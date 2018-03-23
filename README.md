@@ -1,4 +1,5 @@
-# hradecFS
+# HradecFS 
+---
 
 
   HradecFS is a simple and really fast cache file system for filesystem mounted over WAN!
@@ -29,5 +30,7 @@
 
   HradecFS is derived from "Big Brother File System by Joseph J. Pfeiffer", which basically is
   an "example" code to create Fuse Filesystem.
+  
+  I'll try to describe it better in the future... ;)
 
   Thanks lots, Mr. Joseph J. Pfeiffer!!
