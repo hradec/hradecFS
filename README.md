@@ -27,6 +27,12 @@
   becomes as fast as if the filesystem was local! (only slowing down when there's actually
   file data remotely that needs to be retrieved)
 
+  Also, HradecFS works as UnionFS with "copy on write" enable. So everything written to a hradecFS will
+  be written locally.
+
+  Essentially, for now, HradecFS treats the remote cached filesystem as READ ONLY!
+
+
   HradecFS is derived from "Big Brother File System by Joseph J. Pfeiffer", which basically is
   an "example" code to create Fuse Filesystem.
 

@@ -33,6 +33,25 @@
 #include "log.h"
 
 
+#include <glob.h>
+#include <vector>
+#include <string>
+
+inline std::vector<std::string> glob(const std::string& pat){
+    using namespace std;
+    glob_t glob_result;
+    glob(pat.c_str(),GLOB_TILDE,NULL,&glob_result);
+    vector<string> ret;
+    for(unsigned int i=0;i<glob_result.gl_pathc;++i){
+        ret.push_back(string(glob_result.gl_pathv[i]));
+        log_msg("\nglob = %s \n", string(glob_result.gl_pathv[i]).c_str() );
+    }
+    globfree(&glob_result);
+    return ret;
+}
+
+
+
 char existsSymLink(char *path)
 {
   struct stat s;
@@ -124,7 +143,12 @@ char *replace_str(char *str, char *orig, char *rep)
    return buffer;
 }
 
-
+long getFileSize(std::string filename)
+{
+    struct stat stat_buf;
+    int rc = stat(filename.c_str(), &stat_buf);
+    return rc == 0 ? stat_buf.st_size : -1;
+}
 
 bool checkFileSize(const char *path1, const char *path2)
 {

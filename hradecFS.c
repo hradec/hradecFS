@@ -70,6 +70,19 @@ __cache CACHE;
 
 
 
+void task1(void (*func)() ) {
+    log_msg("\nmultithread --> task1\n");
+    (*func)();
+    sleep(60);
+}
+
+
+void cleanupCache(){
+    CACHE.cleanupCache();
+}
+
+
+
 ///////////////////////////////////////////////////////////
 //
 // Prototypes for all these functions, and the C-style comments,
@@ -99,8 +112,8 @@ int hradecFS_getattr(const char *path, struct stat *statbuf)
             CACHE.doCachePath( path, statbuf );
             log_msg("\nREMOTE  hradecFS_getattr_cache( CACHE.doCachePathParentDir(%s) )\n", CACHE.localPath( path ));
         }
-        retstat = CACHE.stat( path, statbuf );
     }
+    retstat = CACHE.stat( path, statbuf );
 
     if( retstat < 0 ){
         // lstat("/dev/shm/_______________", statbuf);
@@ -553,10 +566,12 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
     char custom_cmd[PATH_MAX*2];
 
+    long remoteSize = 0;
+
     CACHE.init( path );
 
     // log_msg("\nhradecFS_open(path\"%s\", fi=0x%08x)\n", path, fi);
-    hradecFS_fullpath(fpath, path);
+    // hradecFS_fullpath(fpath, path);
 
     /* TODO:
             checar o upload folder se tem o arquivo q queremos cachear... se tiver, pega de la ao inves de pegar do server,
@@ -571,15 +586,15 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
     sprintf( cacheFileLock, "%s_locked", CACHE.localPath(path) );
 
 
-    log_msg("\nhradecFS_open(CACHE.localPath(\"%s\")\n", CACHE.localPath(path));
+    log_msg( "\nhradecFS_open(CACHE.localPath(\"%s\") - %s\n", CACHE.localPath(path), path );
 
     // copy file to local cache, if its not there or size doesn't match!!!
     count=0;
 
     // check if a .bbfslog file has 100%, which means rsync transfered the file 100% suscessfully!
     // sprintf( cmd, "%s.bbfslog", CACHE.localPath(path) );
-    if( exists( CACHE.localPathLog(path) ) && grep( CACHE.localPathLog(path), "100%" ) ){
-        log_msg( "\nalready cached = %s", CACHE.localPathLog(path));
+    if( exists( CACHE.localPathLog(path) ) && grep( CACHE.localPathLog(path), "100%" ) && CACHE.fileInSync(path) ){
+        log_msg( "\nalready cached = %s\n", CACHE.localPathLog(path));
 
     // we don't have the file locally, so lets cache it!
     }else{
@@ -591,11 +606,14 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
         // checkFileSize needs to become CACHE.fileInSync()
         while ( ! CACHE.fileInSync(path) ) {
+            remoteSize = getFileSize(CACHE.remotePath(path));
+            log_msg("\n\n\n=====================================================================\n" );
 
             // if remote file doesn't exist, don't try to transfer it!!
             // this should account for when a file disappears from the remote filesystem during a transfer!
-            if( ! exists(fpath) ){
-                sprintf(cacheFile,"%s",fpath);
+            // if( ! exists(CACHE.remotePath(path)) ){
+            if( ! CACHE.existsRemote( path ) ){
+                log_msg( "\n %s doesn't exist remotely, so can't rsync!\n", CACHE.remotePath(path) );
                 break;
             }
 
@@ -611,7 +629,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 pthread_mutex_lock(&mutex);
                 if( ! exists(CACHE.localPathLock(path)) ){
                     rsyncIt=0;
-                    if ( ! checkFileSize(fpath, cacheFile) ) {
+                    if ( getFileSize(CACHE.localPath(path)) != remoteSize ) {
                         // if theres a fileLock, just unlock threads and wait!
                         sprintf( cmd, "touch  %s\n", CACHE.localPathLock(path) );
                         system( cmd );
@@ -653,27 +671,41 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                     log_msg("\nrsync system return: %d", system( cmd ) );
                 }
 
+                sleep(1);
+                count=0;
+                while( remoteSize != getFileSize(CACHE.localPath(path)) && count<5  ){
+                    sleep(1);
+                    count++;
+                }
+
+                if( count>4 ) {
+                    log_msg("\n\ntransfer failed!!!\n\n");
+
+                }
+
                 // rsync done, so we lock threads and remove lockfile!
                 pthread_mutex_lock(&mutex);
                 sprintf( cmd, "rm  %s\n", CACHE.localPathLock(path) );
                 system( cmd );
                 pthread_mutex_unlock(&mutex);
+
+                log_msg("\n\nFINISHED RSYNC\n\n");
             }
 
         }
     }
 
     // log_msg( "\nBB_DATA->cachedir=%s", BB_DATA->cachedir);
-    // log_msg( "\ncacheFile=%s - %d", cacheFile, fi->flags);
+    //log_msg( "\ncacheFile=%s - %d", cacheFile, fi->flags);
 
-    // fd = log_syscall("open", open(cacheFile, fi->flags), 0);
+    // fd = log_syscall("===>open", open(cacheFile, fi->flags), 0);
     fd = open(CACHE.localPath(path), fi->flags);
     if (fd < 0)
         retstat = log_error("open");
 
     fi->fh = fd;
 
-    // log_fi(fi);
+    log_fi(fi);
 
 
     return retstat;
@@ -703,7 +735,7 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
     // // no need to get fpath on this one, since I work from fi->fh not the path
     // log_fi(fi);
 
-    return log_syscall("pread", pread(fi->fh, buf, size, offset), 0);
+    return log_syscall("====>pread", pread(fi->fh, buf, size, offset), 0);
 }
 
 /** Write data to an open file
@@ -946,10 +978,14 @@ void *hradecFS_init(struct fuse_conn_info *conn)
     log_fuse_context( fuse_get_context() );
     log_msg("\nhradecFS_init()\n");
 
-
     pthread_mutex_lock(&mutex);
     CACHE.cleanupBeforeStart();
+    CACHE.cleanupCache();
     pthread_mutex_unlock(&mutex);
+
+
+    // std::thread t1(task1, cleanupCache);
+
 
     return BB_DATA;
 }
@@ -1286,6 +1322,8 @@ int main(int argc, char *argv[])
 
     mkdir_p( hradecFS_data->mountdir, 0777 ) ;
     mkdir_p( hradecFS_data->cachedir, 0777 ) ;
+
+
 
     // turn over control to fuse
     fprintf(stderr, "about to call fuse_main\n");

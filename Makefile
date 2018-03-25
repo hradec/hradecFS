@@ -1,4 +1,4 @@
-# 
+#
 # HradecFS
 # Copyright (C) 2018 Roberto Hradec <me@hradec.com>
 #
@@ -40,8 +40,8 @@ PACKAGE = fuse-tutorial
 SHELL = /bin/sh
 
 
-bbfs_OBJECTS=$(shell ls *.c | sed 's/\.c/.o /g')
-$(info $(bbfs_OBJECTS))
+OBJECTS=$(shell ls *.c | sed 's/\.c/.o /g')
+# $(info $(bbfs_OBJECTS))
 FUSE_LIBS =  -lfuse -pthread
 
 
@@ -55,18 +55,22 @@ COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 .SUFFIXES: .c .o .obj
 
 
-hradecFS$(EXEEXT): $(bbfs_OBJECTS)
-	@rm -f hradecFS$(EXEEXT)
-	$(LINK) $(bbfs_OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
+hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
+	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
+	rm -f hradecFS$(EXEEXT)
+	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
 
 
 all: hradecFS
 
 
+TEST_FS=/ZRAID2
 
 test: all
-	sshfs -p 22002 atomo2.no-ip.org:/atomo/jobs $(pwd)/test/sshfs/
-	./bbfs -o nonempty $(pwd)/test/sshfs/ /atomo/jobs/
+	$(MKDIR_P) /tmp/xx
+	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
+	./hradecFS -o nonempty $(TEST_FS)/ /tmp/xx
+	echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
 
 
 .c.o:
