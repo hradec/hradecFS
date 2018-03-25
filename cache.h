@@ -354,10 +354,12 @@ class __cache {
                 // if it was deleted remotely, theres another thread wich will delete it locally,
                 // so we don't have to check remotely here!!
                 if ( existsLocal(path) ){
-                    if( isdir(path.c_str()) )
+                    if( isdir(localPath(path)) ){
+                        log_msg("\nexistsRemote -> second if - is dir %s\n",localPath(path) );
                         return true;
+                    }
                     bool ret = exists( m_cache[path]["cacheFile_log"].c_str() );
-                    log_msg("\nexistsRemote -> second if - return %d\n",ret );
+                    log_msg("\nexistsRemote -> second if - return %d - %s\n",ret, localPath(path) );
                     return ret;
                 }
             }
