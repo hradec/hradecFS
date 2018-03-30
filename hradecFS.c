@@ -331,7 +331,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 
 
     log_msg("\nhradecFS_mknod(path=\"%s\", mode=0%3o, dev=%lld)\n",
-      CACHE.localPath( path ), mode, dev);
+        CACHE.localPath( path ), mode, dev);
 
     // On Linux this could just be 'mknod(path, mode, dev)' but this
     // tries to be be more portable by honoring the quote in the Linux
@@ -339,6 +339,8 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
     // make a fifo, but saying it should never actually be used for
     // that.
     if (S_ISREG(mode)) {
+        remove( CACHE.localPath( path ) );
+        remove( CACHE.localPathLog( path ) );
         retstat = log_syscall("open", open( CACHE.localPath( path ), O_CREAT | O_EXCL | O_WRONLY, mode), 0);
         if (retstat >= 0){
             CACHE.localFileNotExistRemove( path );
@@ -353,7 +355,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
         if( retstat == 0 )
             CACHE.localFileNotExistRemove( path );
     }
-    if( retstat == 0 ){
+    if( retstat >= 0 ){
         // create a log file for the newly created file!
         // we must add "100%" in it to fool openDir so
         // it WON'T try to pull it from remote!
@@ -995,6 +997,9 @@ void *hradecFS_init(struct fuse_conn_info *conn, fuse_config *fc)
     CACHE.cleanupBeforeStart();
     CACHE.cleanupCache();
     pthread_mutex_unlock(&mutex);
+
+    // do the initial cache of the root folder
+    CACHE.doCachePathDir( "/" );
 
     // std::thread t1(task1, cleanupCache);
 

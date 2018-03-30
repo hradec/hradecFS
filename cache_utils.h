@@ -103,3 +103,62 @@ int getdir (string dir, vector<string> &files)
     closedir(dp);
     return 0;
 }
+
+
+
+
+char** str_split( char* str, char delim, int* numSplits )
+{
+    char** ret;
+    int retLen;
+    char* c;
+
+    if ( ( str == NULL ) ||
+        ( delim == '\0' ) )
+    {
+        /* Either of those will cause problems */
+        ret = NULL;
+        retLen = -1;
+    }
+    else
+    {
+        retLen = 0;
+        c = str;
+
+        /* Pre-calculate number of elements */
+        do
+        {
+            if ( *c == delim )
+            {
+                retLen++;
+            }
+
+            c++;
+        } while ( *c != '\0' );
+
+        ret = (char **)malloc( ( retLen + 1 ) * sizeof( *ret ) );
+        ret[retLen] = NULL;
+
+        c = str;
+        retLen = 1;
+        ret[0] = str;
+
+        do
+        {
+            if ( *c == delim )
+            {
+                ret[retLen++] = &c[1];
+                *c = '\0';
+            }
+
+            c++;
+        } while ( *c != '\0' );
+    }
+
+    if ( numSplits != NULL )
+    {
+        *numSplits = retLen;
+    }
+
+    return ret;
+}

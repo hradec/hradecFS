@@ -196,7 +196,7 @@ class __cache {
             // if(m_stat[path]==NULL){
                 if( existsLocal(path) ){
                     retstat = lstat( localPath(path), statbuf );
-                    // log_msg("..%s..%d..\n", localPath(path), statbuf);
+                    statbuf->st_size = getPathSizeFromLog( path );
                 }else if( existsRemote( path ) ){
                     retstat = lstat( remotePath(path), statbuf );
                     log_msg("..%s..%d..\n", remotePath(path), statbuf);
@@ -241,6 +241,19 @@ class __cache {
             // log_msg("CACHE.stat(%s)..%d..\n", path.c_str(), int(m_stat[path]->st_ino));
             log_msg( "    >>>  CACHE.stat(%s) return %d \n", path.c_str(), retstat );
             return retstat;
+        }
+
+        long long getPathSizeFromLog( string path){
+            char buff[8193];
+            int nsplit;
+            int file = open( localPathLog( path ), O_RDONLY );
+            read( file, buff, 8192 );
+            close( file );
+            char** lines = str_split( buff, '\n', &nsplit );
+            char** split = str_split( lines[0], '*', &nsplit );
+            if( nsplit>0 )
+                return (long long)atoll( split[1] );
+            return 0;
         }
 
         const char * localPathLock(string path){
@@ -318,6 +331,7 @@ class __cache {
             if ( ! exists( localPath(path) ) ){
                 creat( localPath(path), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
             }
+
             // set remote file stats to file
             setStats( localPath(path), &statbuf);
 
@@ -386,7 +400,8 @@ class __cache {
                 //     doCachePathDir(path, __depth+1);
                 //}
             }else{
-                symlink("NOT_DIR_FILE_OR_LINK_REMOTELY", localPath(path));
+                mkdir( localPath(path), statbuf->st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
+                // symlink("NOT_DIR_FILE_OR_LINK_REMOTELY", localPath(path));
             }
             localFileExist(path);
         }
@@ -545,13 +560,17 @@ class __cache {
                 return false;
             }else{
                 if( depth<1 ){
-                    // doCachePathParentDir( path );  // CANT DO THIS!!!
+                    doCachePathParentDir( path );
 
                     // if the folder exists remotely,
                     // lets cache it to avoid future remote query on the same path
-                    bool __isdir = isdir( remotePath(path) );
+                    log_msg("existsRemote -> fifth if  - doCachePath(%s)  \n", path.c_str() );
+                    doCachePath( path );
+                    bool __isdir = isdir( localPath(path) );
                     if( __isdir ){
+                        log_msg("existsRemote -> fifth if  - doCachePathDir(%s)  \n", path.c_str() );
                         doCachePathDir( path );
+                    }else{
                     }
                     // call itself again to do the local evaluation again after the caching!!
                     // log_msg("existsRemote -> fifth if  - recurse\n" );

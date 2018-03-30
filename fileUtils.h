@@ -69,8 +69,23 @@ char existsSymLink(const char *path)
 
 
 
+char islnk(const char *path)
+{
+  struct stat s;
+  int err = lstat(path, &s);
+  if(-1 == err || ! S_ISLNK(s.st_mode)) {
+    return 0;
+  }
+  return 1;
+}
+
+
 char exists(const char *path)
 {
+  if( islnk( path ) ){
+      log_msg( "\nexists is link = true\n" );
+      return 1;
+  }
   struct stat s;
   int err = stat(path, &s);
   if( -1 == err )
@@ -109,6 +124,9 @@ char islnk(string path){
 
 char isdir(const char *path)
 {
+  if( islnk( path ) ){
+    return 0;
+  }
   struct stat s;
   int err = stat(path, &s);
   if(-1 == err || ! S_ISDIR(s.st_mode)) {
@@ -118,6 +136,9 @@ char isdir(const char *path)
 }
 char isfile(const char *path)
 {
+  if( islnk( path ) ){
+    return 0;
+  }
   struct stat s;
   int err = stat(path, &s);
   if(-1 == err || ! S_ISREG(s.st_mode)) {
@@ -125,17 +146,6 @@ char isfile(const char *path)
   }
   return 1;
 }
-char islnk(const char *path)
-{
-  struct stat s;
-  int err = lstat(path, &s);
-  if(-1 == err || ! S_ISLNK(s.st_mode)) {
-    return 0;
-  }
-  return 1;
-}
-
-
 char *replace_str(char *str, const char *orig, const char *rep)
 {
    static char buffer[1024];
