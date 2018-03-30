@@ -152,36 +152,40 @@ class __cache {
 
         void cleanupBeforeStart(){
             // remove all leftover lockFiles, if any!
-            system( (string("rm -rf ")+_cacheControl()+"/*.__link__").c_str() );
-            system( (string("rm -rf ")+_cacheControl()+"/*.__folder__").c_str() );
-            system( (string("rm -rf ")+_cacheControl()+"/*.cacheLockFile").c_str() );
-            system( (string("rm -rf ")+_cacheControl()+"/.cacheReadDir").c_str() );
-            // system( (string("rm -rf ")+_cacheControl()+"/*.cacheReadDir").c_str() );
+
+            vector<string> files = glob(_cacheControl() + "*cacheLockFile" );
+            for ( unsigned int i = 0; i < files.size(); i++ ) {
+                remove( files[i].c_str() );
+            }
+
+            vector<string> files2 = glob(_cacheControl() + "*cacheReadDir" );
+            for ( unsigned int i = 0; i < files2.size(); i++ ) {
+                remove( files2[i].c_str() );
+            }
+
+            vector<string> files3 = glob(_cacheControl() + "*__folder__" );
+            for ( unsigned int i = 0; i < files3.size(); i++ ) {
+                remove( files3[i].c_str() );
+            }
+
+            vector<string> files4 = glob(_cacheControl() + "*__link__" );
+            for ( unsigned int i = 0; i < files4.size(); i++ ) {
+                remove( files4[i].c_str() );
+            }
+
+            remove( ( string( _cacheControl() ) + "/.cacheReadDir" ).c_str() );
+
+
+            // system( (string("rm -rf ")+_cacheControl()+"/.cacheReadDir").c_str() );
+            // system( (string("rm -rf ")+_cacheControl()+"/*.__link__").c_str() );
+            // system( (string("rm -rf ")+_cacheControl()+"/*.__folder__").c_str() );
+            // system( (string("rm -rf ")+_cacheControl()+"/*.cacheLockFile").c_str() );
         }
 
         void cleanupCache(){
-            string cmd = "find "+_cacheControl()+" -ctime -60  -name '*cacheReadDir' -exec rm {} \\; ";
-            system( cmd.c_str() );
+            string cmd = "find "+_cacheControl()+" -ctime -60  -name '*cacheReadDir' -exec rm {} \\; &";
+            // system( cmd.c_str() );
             log_msg("cleanupCache %s", cmd.c_str());
-            // struct stat fileAttrs;
-            // vector<string>  list;
-            // vector<string>  __list;
-            // long id;
-            // std::time_t t = std::time(0);
-            // list = glob( _cacheControl()+"*cacheReadDir" );
-            // __list = glob( _cacheControl()+".cacheReadDir" );
-            // for (id=0 ; id<__list.size(); ++id){
-            //     list.push_back( __list[id] );
-            // }
-            // for (id=0 ; id<list.size(); ++id){
-            //     // get size
-            //     if( stat(list[id].c_str(), &fileAttrs) != 0 )
-            //         log_msg("cleanupCache error");
-            //     log_msg("cleanupCache: %s %i - %i\n", list[id].c_str(), fileAttrs.st_ctime, t);
-            //     if( t-fileAttrs.st_ctime > 60*10 ){
-            //         log_msg("cleanupCache: %s %i\n", list[id].c_str(), t-fileAttrs.st_ctime);
-            //     }
-            // }
         }
 
         int stat(string path){

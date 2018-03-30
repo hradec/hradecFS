@@ -101,6 +101,15 @@ int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *fil
     int retstat=-1;
     char fpath[PATH_MAX];
 
+
+    if( string(path) == "/.logoff" ) {
+        log_msg("log off");
+        BB_DATA->log = false;
+    }else if( string(path) == "/.logon" ) {
+        BB_DATA->log = true;
+        log_msg("log on");
+    }
+
     CACHE.init( path );
 
     // if path exists (the exist cache in dev/shm/bbfs._)
@@ -332,6 +341,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 
     log_msg("\nhradecFS_mknod(path=\"%s\", mode=0%3o, dev=%lld)\n",
         CACHE.localPath( path ), mode, dev);
+
 
     // On Linux this could just be 'mknod(path, mode, dev)' but this
     // tries to be be more portable by honoring the quote in the Linux
@@ -995,12 +1005,15 @@ void *hradecFS_init(struct fuse_conn_info *conn, fuse_config *fc)
 
     pthread_mutex_lock(&mutex);
     CACHE.cleanupBeforeStart();
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     CACHE.cleanupCache();
     pthread_mutex_unlock(&mutex);
 
     // do the initial cache of the root folder
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     CACHE.doCachePathDir( "/" );
 
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     // std::thread t1(task1, cleanupCache);
 
     return BB_DATA;
@@ -1319,6 +1332,7 @@ int main(int argc, char *argv[])
     hradecFS_data->mountdir = mountdir;
     hradecFS_data->cachedir = __cacheDir; //
     hradecFS_data->syncCommand = __syncCommand;
+    hradecFS_data->log = true;
 
 
     sprintf(__cacheDir,"%s_cachedir", hradecFS_data->mountdir);

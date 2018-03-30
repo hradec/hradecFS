@@ -88,11 +88,14 @@ inline std::string& ltrim(std::string& s, const char* t )
 
 int getdir (string dir, vector<string> &files)
 {
+    log_msg( "getdir( %s )\n", dir.c_str() );
+
     string cdir = rtrim(dir,"/");
     DIR *dp;
     struct dirent *dirp;
     if((dp  = opendir(dir.c_str())) == NULL) {
-        cout << "Error(" << errno << ") opening " << dir << endl;
+        // cout << "Error(" << errno << ") opening " << dir << endl;
+        log_msg( "\tgetdir %s ERROR: %d\n", dir.c_str(), errno);
         return errno;
     }
 

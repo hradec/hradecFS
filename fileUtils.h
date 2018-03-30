@@ -46,11 +46,12 @@
 inline std::vector<std::string> glob(const std::string& pat){
     using namespace std;
     glob_t glob_result;
-    glob(pat.c_str(),GLOB_TILDE,NULL,&glob_result);
+    int retr = glob(pat.c_str(),GLOB_TILDE,NULL,&glob_result);
+    log_msg( "glob( %s ) = %d - return %d\n", pat.c_str(), (unsigned int)glob_result.gl_pathc, retr );
     vector<string> ret;
     for(unsigned int i=0;i<glob_result.gl_pathc;++i){
         ret.push_back(string(glob_result.gl_pathv[i]));
-        log_msg("\nglob = %s \n", string(glob_result.gl_pathv[i]).c_str() );
+        log_msg("\t%s \n", string(glob_result.gl_pathv[i]).c_str() );
     }
     globfree(&glob_result);
     return ret;

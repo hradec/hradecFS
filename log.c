@@ -158,8 +158,12 @@ FILE *log_open_pipe(int flag)
 void log_msg(const char *format, ...)
 {
     va_list ap;
-    if ( BB_DATA->logfile != NULL ){
-        char buff[8192];
+    char buff[8192];
+    va_start(ap, format);
+    vsprintf(buff, format,  ap);
+    va_end (ap);
+
+    if ( BB_DATA->log && BB_DATA->logfile != NULL ){
 
         string reset    ="\033[0m";
         string green    ="\033[0;32m";
@@ -176,9 +180,6 @@ void log_msg(const char *format, ...)
         string bcyan    ="\033[1;36m";
 
 
-        va_start(ap, format);
-        vsprintf(buff, format,  ap);
-        va_end (ap);
 
         // va_start(ap, format);
         // vfprintf(BB_DATA->logfile, format,  ap);
