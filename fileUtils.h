@@ -9,10 +9,10 @@
 
 */
 
+#include "fuse_setup.h"
 
-#define FUSE_USE_VERSION 30
-
-#include <fuse.h>
+#ifndef  __FILE_UTILS_H__
+#define  __FILE_UTILS_H__
 
 #include <ctype.h>
 #include <dirent.h>
@@ -37,6 +37,12 @@
 #include <vector>
 #include <string>
 
+
+#include <sys/types.h>
+#include <utime.h>
+
+
+
 inline std::vector<std::string> glob(const std::string& pat){
     using namespace std;
     glob_t glob_result;
@@ -52,7 +58,7 @@ inline std::vector<std::string> glob(const std::string& pat){
 
 
 
-char existsSymLink(char *path)
+char existsSymLink(const char *path)
 {
   struct stat s;
   int err = stat(path, &s);
@@ -63,7 +69,7 @@ char existsSymLink(char *path)
 
 
 
-char exists(char *path)
+char exists(const char *path)
 {
   struct stat s;
   int err = stat(path, &s);
@@ -86,36 +92,51 @@ char exists(char *path)
  }
 
 
-char isdir(char *path)
+char chown(string path, uid_t owner, gid_t group){
+    return chown(path.c_str(), owner, group);
+}
+
+
+char isdir(string path){
+    return isdir(path.c_str());
+}
+char isfile(string path){
+    return isfile(path.c_str());
+}
+char islnk(string path){
+    return islnk(path.c_str());
+}
+
+char isdir(const char *path)
 {
   struct stat s;
   int err = stat(path, &s);
-  if(-1 == err || !S_ISDIR(s.st_mode)) {
+  if(-1 == err || ! S_ISDIR(s.st_mode)) {
     return 0;
   }
   return 1;
 }
-char isfile(char *path)
+char isfile(const char *path)
 {
   struct stat s;
   int err = stat(path, &s);
-  if(-1 == err || !S_ISREG(s.st_mode)) {
+  if(-1 == err || ! S_ISREG(s.st_mode)) {
     return 0;
   }
   return 1;
 }
-char islnk(char *path)
+char islnk(const char *path)
 {
   struct stat s;
   int err = lstat(path, &s);
-  if(-1 == err || !S_ISLNK(s.st_mode)) {
+  if(-1 == err || ! S_ISLNK(s.st_mode)) {
     return 0;
   }
   return 1;
 }
 
 
-char *replace_str(char *str, char *orig, char *rep)
+char *replace_str(char *str, const char *orig, const char *rep)
 {
    static char buffer[1024];
    char *p;
@@ -259,3 +280,31 @@ static void hradecFS_fullpath(char fpath[PATH_MAX], const char *path)
 
     log_msg("    hradecFS_fullpath:  rootdir = \"%s\", path = \"%s\", fpath = \"%s\"\n", BB_DATA->rootdir, path, fpath);
 }
+
+
+bool grep( const char *file, const char *str ){
+    #define MAXBUFLEN 1000000
+    bool ret=false;
+    char source[MAXBUFLEN + 1];
+    FILE *fp = fopen(file, "r");
+    if (fp != NULL) {
+        while(!feof(fp)){
+            size_t newLen = fread(source, sizeof(char), MAXBUFLEN, fp);
+            if ( ferror( fp ) != 0 ) {
+                fputs("Error reading file", stderr);
+                break;
+            } else {
+                if( strstr(source, str) != NULL ){
+                    ret=true;
+                    break;
+                }
+            }
+        }
+        fclose(fp);
+    }
+    return ret;
+
+}
+
+
+#endif

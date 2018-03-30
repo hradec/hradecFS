@@ -14,7 +14,7 @@
 AWK = gawk
 CC = g++
 # CCDEPMODE = depmode=gcc3
-CFLAGS = -g -O2
+CFLAGS = -g -O3
 # CFLAGS = -g
 CPP = g++ -E
 LINK=g++
@@ -42,7 +42,7 @@ SHELL = /bin/sh
 
 OBJECTS=$(shell ls *.c | sed 's/\.c/.o /g')
 # $(info $(bbfs_OBJECTS))
-FUSE_LIBS =  -lfuse -pthread
+FUSE_LIBS =  -lfuse3 -pthread
 
 
 
@@ -64,13 +64,13 @@ hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
 all: hradecFS
 
 
-TEST_FS=/ZRAID2
+TEST_FS=/ZRAID2/atomo/
 
 test: all
 	$(MKDIR_P) /tmp/xx
 	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
-	./hradecFS -o nonempty $(TEST_FS)/ /tmp/xx
-	echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
+	./hradecFS  $(TEST_FS)/ /tmp/xx
+	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
 
 
 .c.o:

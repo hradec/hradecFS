@@ -14,7 +14,6 @@
 #include "params.h"
 
 #include <errno.h>
-#include <fuse.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +26,34 @@
 #include <netinet/in.h>
 
 #include "log.h"
+
+#include <map>
+#include <vector>
+#include <string>
+#include <iostream>
+#include <cstdarg>
+#include <thread>
+#include <time.h>
+#include <boost/algorithm/string/replace.hpp>
+
+
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <libgen.h>
+#include <limits.h>
+#include <glob.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <glob.h>
+
+#include <utime.h>
+
+
+// #include "cache_utils.h"
+
+using namespace std;
 
 #define u_int8 unsigned char
 #define BUF_SIZE 2048
@@ -57,6 +84,28 @@
 
 
 
+//missing string printf
+//this is safe and convenient but not exactly efficient
+// inline std::string _format(const char* fmt, ...){
+//     int size = 4096;
+//     char* buffer = 0;
+//     buffer = new char[size];
+//     va_list vl;
+//     va_start(vl, fmt);
+//     int nsize = vsnprintf(buffer, size, fmt, vl);
+//     if(size<=nsize){ //fail delete buffer and try again
+//         delete[] buffer;
+//         buffer = 0;
+//         buffer = new char[nsize+1]; //+1 for /0
+//         nsize = vsnprintf(buffer, size, fmt, vl);
+//     }
+//     std::string ret(buffer);
+//     va_end(vl);
+//     delete[] buffer;
+//     return ret;
+// }
+
+
 FILE *log_open()
 {
     FILE *logfile;
@@ -75,7 +124,7 @@ FILE *log_open()
     return logfile;
 }
 
-FILE *log_open_pipe(int flag=1)
+FILE *log_open_pipe(int flag)
 {
     FILE *logfile;
 
@@ -108,17 +157,63 @@ FILE *log_open_pipe(int flag=1)
 
 void log_msg(const char *format, ...)
 {
+    va_list ap;
     if ( BB_DATA->logfile != NULL ){
-        va_list ap;
-        va_start(ap, format);
+        char buff[8192];
 
-        vfprintf(BB_DATA->logfile, format, ap);
+        string reset    ="\033[0m";
+        string green    ="\033[0;32m";
+        string bgreen   ="\033[1;32m";
+        string red      ="\033[0;31m";
+        string bred     ="\033[1;31m";
+        string yellow   ="\033[0;33m";
+        string byellow  ="\033[1;33m";
+        string blue     ="\033[0;34m";
+        string bblue    ="\033[1;34m";
+        string magenta  ="\033[0;35m";
+        string bmagenta ="\033[1;35m";
+        string cyan     ="\033[0;36m";
+        string bcyan    ="\033[1;36m";
+
+
+        va_start(ap, format);
+        vsprintf(buff, format,  ap);
+        va_end (ap);
+
+        // va_start(ap, format);
+        // vfprintf(BB_DATA->logfile, format,  ap);
+        // va_end (ap);
+
+        // string tmp = string("\nhradecFS: ") + format; //_format( , ap);
+        string tmp;
+        tmp = boost::replace_all_copy( string(buff), "\n\n\n", "\n\n" );
+        if( tmp.find("REMOTE") != string::npos ){
+            tmp = bcyan+"=======================================\n"+tmp;
+        }
+        tmp = boost::replace_all_copy( tmp, "\n\n", "\n" );
+
+        tmp = boost::replace_all_copy( tmp, "\n", "\nhradecFS:" );
+        tmp = boost::replace_all_copy( tmp, "hradecFS: hradecFS:", green+"hradecFS:"+bgreen+"=======================================  "+reset );
+        tmp = boost::replace_all_copy( tmp, "hradecFS:", green+"hradecFS:"+reset );
+        tmp = boost::replace_all_copy( tmp, "REMOTE", bred+"REMOTE" );
+        tmp = boost::replace_all_copy( tmp, "exist", yellow+"exist" );
+        tmp = boost::replace_all_copy( tmp, ">>>", bblue+">>>" );
+        tmp = boost::replace_all_copy( tmp, "===", cyan+"===" );
+        tmp = boost::replace_all_copy( tmp, "---", bcyan+"---" );
+        tmp = boost::replace_all_copy( tmp, "1.doCache", bmagenta+"1.doCache" );
+        tmp = boost::replace_all_copy( tmp, "\n", reset+"\n" );
+
+
+
+        fprintf(BB_DATA->logfile, tmp.c_str());
+
+        // fprintf( stderr,  tmp.c_str());
         fflush(BB_DATA->logfile);
     }
 }
 
 // Report errors to logfile and give -errno to caller
-int log_error(char *func)
+int log_error(const char *func)
 {
     int ret = -errno;
 
@@ -176,7 +271,7 @@ void log_conn(struct fuse_conn_info *conn)
 
     /** Is asynchronous read supported (read-write) */
     // unsigned async_read;
-    log_struct(conn, async_read, %d, );
+    // log_struct(conn, async_read, %d, );
 
     /** Maximum size of the write buffer */
     // unsigned max_write;
@@ -220,7 +315,7 @@ void log_fi (struct fuse_file_info *fi)
 
     /** Old file handle, don't use */
     //	unsigned long fh_old;
-	log_struct(fi, fh_old, 0x%08lx,  );
+	// log_struct(fi, fh_old, 0x%08lx,  );
 
     /** In case of a write operation indicates if this was caused by a
         writepage */
@@ -250,7 +345,7 @@ void log_fi (struct fuse_file_info *fi)
 	log_struct(fi, lock_owner, 0x%016llx, );
 }
 
-void log_retstat(char *func, int retstat)
+void log_retstat(const char *func, int retstat)
 {
     int errsave = errno;
     log_msg("    %s returned %d\n", func, retstat);
@@ -259,7 +354,7 @@ void log_retstat(char *func, int retstat)
 
 // make a system call, checking (and reporting) return status and
 // possibly logging error
-int log_syscall(char *func, int retstat, int min_ret)
+int log_syscall(const char *func, int retstat, int min_ret)
 {
     log_retstat(func, retstat);
 

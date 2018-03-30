@@ -10,13 +10,27 @@
 */
 
 
+#include "fileUtils.h"
+
+#include <map>
+#include <vector>
+#include <string>
+#include <iostream>
+#include <cstdarg>
+#include <thread>
+#include <time.h>
+#include <boost/algorithm/string/replace.hpp>
+
+using namespace std;
+
 typedef struct stat _stat;
+
 static pthread_mutex_t mutex;
 
 
 //missing string printf
 //this is safe and convenient but not exactly efficient
-inline std::string _format(const char* fmt, ...){
+std::string _format(const char* fmt, ...){
     int size = 4096;
     char* buffer = 0;
     buffer = new char[size];

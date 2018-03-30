@@ -95,48 +95,28 @@ void cleanupCache(){
  * mount option is given.
  */
 
-int hradecFS_getattr(const char *path, struct stat *statbuf)
+int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *file_info)
 {
+    (void) file_info;
     int retstat=-1;
     char fpath[PATH_MAX];
 
     CACHE.init( path );
 
     // if path exists (the exist cache in dev/shm/bbfs._)
-     log_msg("\nREMOTE  hradecFS_getattr_cache - %s", path);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_getattr %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     if ( CACHE.existsRemote( path ) ){
 
         // if we have the file cached (just a placeholder or the actual full file, doesn't matter)
         if( ! CACHE.existsLocal( path ) ){
-            CACHE.doCachePathParentDir( path );
-            CACHE.doCachePath( path, statbuf );
+            // CACHE.doCachePathParentDir( path );
+            // CACHE.doCachePath( path, statbuf );
             log_msg("\nREMOTE  hradecFS_getattr_cache( CACHE.doCachePathParentDir(%s) )\n", CACHE.localPath( path ));
         }
     }
     retstat = CACHE.stat( path, statbuf );
 
-    if( retstat < 0 ){
-        // lstat("/dev/shm/_______________", statbuf);
-        // log_msg("\nhradecFS_getattr path=%s - %d\n", CACHE_FILE_NOT_EXIST, );
-        statbuf->st_dev = 0;
-        statbuf->st_ino = 0;
-        statbuf->st_mode = 00;
-        statbuf->st_nlink = 0;
-        statbuf->st_uid = 0;
-        statbuf->st_gid = 0;
-        statbuf->st_rdev = 0;
-        statbuf->st_size = 0;
-        statbuf->st_blksize = 0;
-        statbuf->st_blocks = 0;
-        statbuf->st_atime = 0x00000000;
-        statbuf->st_mtime = 0x00000000;
-        statbuf->st_ctime = 0x00000000;
-        retstat = -2;
-        // log_msg("\nhradecFS_getattr zero path=%s does not exist\n", path);
-    }
-    // else
-    //     log_msg("\tRESULT hradecFS_getattr(path=\"%s\", retstat=0x%08x)\n",      path, retstat);
-
+    log_msg("\nREMOTE RETURN  hradecFS_getattr_cache - %s - return %d", path, retstat);
     return retstat;
 }
 
@@ -154,7 +134,7 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
     int retstat = 0;
     char fpath[PATH_MAX];
 
-    log_msg("hradecFS_opendir %s", path);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_opendir %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     CACHE.init( path );
     if ( ! CACHE.existsRemote( path ) ){
@@ -209,7 +189,7 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
  */
 
 int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset,
-           struct fuse_file_info *fi)
+           struct fuse_file_info *fi,  fuse_readdir_flags flags)
 {
     // CACHE DOC:
     //      We don't need to do anything here, since hradecFS_opendir is responsable for caching the
@@ -220,34 +200,54 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
     DIR *dp;
     struct dirent *de;
 
+    CACHE.init( path );
+    CACHE.doCachePathDir( path );
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_readdir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     // log_msg("\nhradecFS_readdir(path=\"%s\", buf=0x%08x, filler=0x%08x, offset=%lld, fi=0x%08x)\n",path, buf, filler, offset, fi);
     // once again, no need for fullpath -- but note that I need to cast fi->fh
-    dp = (DIR *) (uintptr_t) fi->fh;
+    // dp = (DIR *) (uintptr_t) fi->fh;
+
+    dp = opendir( CACHE.localPath( path ) );
+    if (dp == NULL)
+        return -errno;
 
     // Every directory contains at least two entries: . and ..  If my
     // first call to the system readdir() returns NULL I've got an
     // error; near as I can tell, that's the only condition under
     // which I can get an error from readdir()
-    de = readdir(dp);
-    // log_msg("    readdir returned 0x%p\n", de);
-    if (de == 0) {
-        retstat = log_error("hradecFS_readdir readdir");
-        return retstat;
-    }
+    // de = readdir(dp);
+    // // log_msg("    readdir returned 0x%p\n", de);
+    // if (de == 0) {
+    //     retstat = log_error("hradecFS_readdir readdir");
+    //     return retstat;
+    // }
 
     // This will copy the entire directory into the buffer.  The loop exits
     // when either the system readdir() returns NULL, or filler()
     // returns something non-zero.  The first case just means I've
     // read the whole directory; the second means the buffer is full.
-    do {
-        // log_msg("calling filler with name %s\n", de->d_name);
-        if (filler(buf, de->d_name, NULL, 0) != 0) {
-            log_msg("    ERROR hradecFS_readdir filler:  buffer full");
-            return -ENOMEM;
-        }
-    } while ((de = readdir(dp)) != NULL);
+    // do {
+    while ((de = readdir(dp)) != NULL) {
+        string entry = string(path)+"/"+de->d_name;
+        CACHE.init(entry);
 
+        log_msg("\033[1;31m calling filler with name %s\n", de->d_name);
+        if( string(de->d_name)==".." || string(de->d_name)=="." || CACHE.existsRemote( entry ) ){
+            struct stat st;
+            memset(&st, 0, sizeof(st));
+            st.st_ino = de->d_ino;
+            st.st_mode = de->d_type << 12;
+            // lstat( CACHE.localPath(entry), &st );
+            if ( filler( buf, de->d_name, &st, 0, 0 ) ) {
+                log_msg( "\033[1;31m      >>>>> ERROR hradecFS_readdir filler:  buffer full" );
+                // return -ENOMEM;
+                break;
+            }
+        }
+    } //while ((de = readdir(dp)) != NULL);
+
+    closedir( dp );
     log_fi(fi);
 
     return retstat;
@@ -261,6 +261,7 @@ int hradecFS_releasedir(const char *path, struct fuse_file_info *fi)
 {
     int retstat = 0;
 
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_releasedir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     // CACHE.init( path );
     log_fi(fi);
     closedir((DIR *) (uintptr_t) fi->fh);
@@ -285,19 +286,21 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
     int retstat;
     char fpath[PATH_MAX];
 
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_readlink  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     retstat = -1;
     // no path in the remote
 
-    if ( CACHE.existsRemote( path ) ){
-        CACHE.doCachePathParentDir( path );
-        CACHE.doCachePath( path );
+    if ( ! CACHE.existsRemote( path ) ){
+        return retstat;
+        // CACHE.doCachePathParentDir( path );
+        // CACHE.doCachePath( path );
     }
 
     if( CACHE.existsLocal( path ) ){
-        log_msg("CACHE  hradecFS_readlink_cached(path=\"%s\", link=\"%s\", size=%d)\n", CACHE.localPath(path), link, size);
         retstat = log_syscall("CACHE.localPath", readlink(CACHE.localPath(path), link, size - 1), 0);
+        log_msg("CACHE  hradecFS_readlink_cached(path=\"%s\", link=\"%s\", size=%d)\n", CACHE.localPath(path), link, size);
     // }else{
     //     if( ! CACHE.isDirCached(path) ) {
     //         log_msg("REMOTE  hradecFS_readlink(path=\"%s\", link=\"%s\", size=%d)\n", CACHE.remotePath(path), link, size);
@@ -309,9 +312,9 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
         link[retstat] = '\0';
         retstat = 0;
     }
-
     return retstat;
 }
+
 
 /** Create a file node
  *
@@ -321,15 +324,14 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
 // shouldn't that comment be "if" there is no.... ?
 int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 {
-    int retstat;
-    char fpath[PATH_MAX];
+    int retstat=-1;
 
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_mknod  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
 
-    hradecFS_fullpath(fpath, path);
     log_msg("\nhradecFS_mknod(path=\"%s\", mode=0%3o, dev=%lld)\n",
-      fpath, mode, dev);
+      CACHE.localPath( path ), mode, dev);
 
     // On Linux this could just be 'mknod(path, mode, dev)' but this
     // tries to be be more portable by honoring the quote in the Linux
@@ -351,6 +353,17 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
         if( retstat == 0 )
             CACHE.localFileNotExistRemove( path );
     }
+    if( retstat == 0 ){
+        // create a log file for the newly created file!
+        // we must add "100%" in it to fool openDir so
+        // it WON'T try to pull it from remote!
+        int file = creat( CACHE.localPathLog( path ), mode );
+        string tmp = _format( "%s*%lld\n100%\n)", CACHE.localPath( path ) , -1 );
+        write( file, tmp.c_str(),  tmp.length() );
+        close( file );
+        CACHE.localFileNotExistRemove( path );
+
+    }
 
 
     return retstat;
@@ -359,11 +372,12 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 /** Create a directory */
 int hradecFS_mkdir(const char *path, mode_t mode)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_mkdir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
+
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
-    log_msg("\nhradecFS_mkdir(path=\"%s\", mode=0%3o)\n",
-        path, mode);
+    log_msg("\nhradecFS_mkdir(path=\"%s\", mode=0%3o)\n", path, mode);
     // hradecFS_fullpath(fpath, path);
 
     return log_syscall("mkdir", mkdir( CACHE.localPath( path ), mode), 0);
@@ -372,6 +386,7 @@ int hradecFS_mkdir(const char *path, mode_t mode)
 /** Remove a file */
 int hradecFS_unlink(const char *path)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_unlink  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -389,6 +404,7 @@ int hradecFS_unlink(const char *path)
 /** Remove a directory */
 int hradecFS_rmdir(const char *path)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_rmdir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -410,6 +426,7 @@ int hradecFS_rmdir(const char *path)
 // unaltered, but insert the link into the mounted directory.
 int hradecFS_symlink(const char *path, const char *link)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_symlink  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( link );
 
     // char flink[PATH_MAX];
@@ -423,8 +440,9 @@ int hradecFS_symlink(const char *path, const char *link)
 
 /** Rename a file */
 // both path and newpath are fs-relative
-int hradecFS_rename(const char *path, const char *newpath)
+int hradecFS_rename(const char *path, const char *newpath,  unsigned int i)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_rename  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
     CACHE.init( newpath );
 
@@ -442,6 +460,7 @@ int hradecFS_rename(const char *path, const char *newpath)
 /** Create a hard link to a file */
 int hradecFS_link(const char *path, const char *newpath)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_link  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
     CACHE.init( newpath );
 
@@ -456,8 +475,9 @@ int hradecFS_link(const char *path, const char *newpath)
 }
 
 /** Change the permission bits of a file */
-int hradecFS_chmod(const char *path, mode_t mode)
+int hradecFS_chmod(const char *path, mode_t mode,  fuse_file_info *fi )
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_chmod  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -470,9 +490,9 @@ int hradecFS_chmod(const char *path, mode_t mode)
 }
 
 /** Change the owner and group of a file */
-int hradecFS_chown(const char *path, uid_t uid, gid_t gid)
-
+int hradecFS_chown(const char *path, uid_t uid, gid_t gid,  fuse_file_info *fi)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_chown  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -485,8 +505,9 @@ int hradecFS_chown(const char *path, uid_t uid, gid_t gid)
 }
 
 /** Change the size of a file */
-int hradecFS_truncate(const char *path, off_t newsize)
+int hradecFS_truncate(const char *path, off_t newsize,  fuse_file_info *fi)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_truncate  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -502,6 +523,7 @@ int hradecFS_truncate(const char *path, off_t newsize)
 /* note -- I'll want to change this as soon as 2.6 is in debian testing */
 int hradecFS_utime(const char *path, struct utimbuf *ubuf)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_utime  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -524,29 +546,7 @@ int hradecFS_utime(const char *path, struct utimbuf *ubuf)
  * Changed in version 2.2
  */
 
-bool grep(char *file, char *str){
-    #define MAXBUFLEN 1000000
-    bool ret=false;
-    char source[MAXBUFLEN + 1];
-    FILE *fp = fopen(file, "r");
-    if (fp != NULL) {
-        while(!feof(fp)){
-            size_t newLen = fread(source, sizeof(char), MAXBUFLEN, fp);
-            if ( ferror( fp ) != 0 ) {
-                fputs("Error reading file", stderr);
-                break;
-            } else {
-                if( strstr(source, str) != NULL ){
-                    ret=true;
-                    break;
-                }
-            }
-        }
-        fclose(fp);
-    }
-    return ret;
 
-}
 
 
 int hradecFS_open(const char *path, struct fuse_file_info *fi)
@@ -567,6 +567,8 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
     char custom_cmd[PATH_MAX*2];
 
     long remoteSize = 0;
+
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_open  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     CACHE.init( path );
 
@@ -666,7 +668,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 {
                     //sprintf( cmd, "\n\nCustom Command: %s  > %s.bbfslog 2>&1 \n\n", custom_cmd, cacheFile );
                     sprintf( tmp, BB_DATA->syncCommand, CACHE.remotePath(path), CACHE.localPath(path) );
-                    sprintf( cmd, "%s > %s", tmp, CACHE.localPathLog(path) );
+                    sprintf( cmd, "%s >> %s", tmp, CACHE.localPathLog(path) );
                     log_msg( cmd );
                     log_msg("\nrsync system return: %d", system( cmd ) );
                 }
@@ -734,6 +736,7 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
     //     path, buf, size, offset, fi);
     // // no need to get fpath on this one, since I work from fi->fh not the path
     // log_fi(fi);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_read  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     return log_syscall("====>pread", pread(fi->fh, buf, size, offset), 0);
 }
@@ -757,6 +760,7 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
     //     );
     // // no need to get fpath on this one, since I work from fi->fh not the path
     // log_fi(fi);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_write  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     return log_syscall("pwrite", pwrite(fi->fh, buf, size, offset), 0);
 }
@@ -771,6 +775,7 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
 int hradecFS_statfs(const char *path, struct statvfs *statv)
 {
     int retstat = 0;
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_statfs  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.init( path );
 
     // char fpath[PATH_MAX];
@@ -814,6 +819,7 @@ int hradecFS_statfs(const char *path, struct statvfs *statv)
 // this is a no-op in BBFS.  It just logs the call and returns success
 int hradecFS_flush(const char *path, struct fuse_file_info *fi)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_flush  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     log_msg("\nhradecFS_flush(path=\"%s\", fi=0x%08x)\n", path, fi);
     // no need to get fpath on this one, since I work from fi->fh not the path
     log_fi(fi);
@@ -837,6 +843,7 @@ int hradecFS_flush(const char *path, struct fuse_file_info *fi)
  */
 int hradecFS_release(const char *path, struct fuse_file_info *fi)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_release  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     // log_msg("\nhradecFS_release(path=\"%s\", fi=0x%08x)\n",
     //   path, fi);
     // log_fi(fi);
@@ -855,6 +862,7 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
  */
 int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_fsync  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     log_msg("\nhradecFS_fsync(path=\"%s\", datasync=%d, fi=0x%08x)\n",
         path, datasync, fi);
     log_fi(fi);
@@ -872,6 +880,7 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 /** Set extended attributes */
 int hradecFS_setxattr(const char *path, const char *name, const char *value, size_t size, int flags)
 {
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_setxattr  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     char fpath[PATH_MAX];
 
     log_msg("\nhradecFS_setxattr(path=\"%s\", name=\"%s\", value=\"%s\", size=%d, flags=0x%08x)\n",
@@ -886,6 +895,7 @@ int hradecFS_getxattr(const char *path, const char *name, char *value, size_t si
 {
     int retstat = 0;
     char fpath[PATH_MAX];
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_getxattr  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     log_msg("\nhradecFS_getxattr(path = \"%s\", name = \"%s\", value = 0x%08x, size = %d)\n",
         path, name, value, size);
@@ -904,6 +914,7 @@ int hradecFS_listxattr(const char *path, char *list, size_t size)
     int retstat = 0;
     char fpath[PATH_MAX];
     char *ptr;
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_listxattr  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     log_msg("hradecFS_listxattr(path=\"%s\", list=0x%08x, size=%d)\n",
         path, list, size
@@ -924,6 +935,7 @@ int hradecFS_listxattr(const char *path, char *list, size_t size)
 int hradecFS_removexattr(const char *path, const char *name)
 {
     char fpath[PATH_MAX];
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_removexattr  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     log_msg("\nhradecFS_removexattr(path=\"%s\", name=\"%s\")\n",
         path, name);
@@ -947,6 +959,7 @@ int hradecFS_removexattr(const char *path, const char *name)
 int hradecFS_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 {
     int retstat = 0;
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_fsyncdir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
     log_msg("\nhradecFS_fsyncdir(path=\"%s\", datasync=%d, fi=0x%08x)\n",
         path, datasync, fi);
@@ -972,20 +985,18 @@ int hradecFS_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 // parameter coming in here, or else the fact should be documented
 // (and this might as well return void, as it did in older versions of
 // FUSE).
-void *hradecFS_init(struct fuse_conn_info *conn)
+void *hradecFS_init(struct fuse_conn_info *conn, fuse_config *fc)
 {
     log_conn( conn );
     log_fuse_context( fuse_get_context() );
-    log_msg("\nhradecFS_init()\n");
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
 
     pthread_mutex_lock(&mutex);
     CACHE.cleanupBeforeStart();
     CACHE.cleanupCache();
     pthread_mutex_unlock(&mutex);
 
-
     // std::thread t1(task1, cleanupCache);
-
 
     return BB_DATA;
 }
@@ -1016,7 +1027,7 @@ void hradecFS_destroy(void *userdata)
 int hradecFS_access(const char *path, int mask)
 {
     int retstat = -1;
-    char *__path=path;
+    const char *__path=path;
     char fpath[PATH_MAX];
 
     CACHE.init( path );
@@ -1072,20 +1083,29 @@ int hradecFS_access(const char *path, int mask)
  *
  * Introduced in version 2.5
  */
-int hradecFS_ftruncate(const char *path, off_t offset, struct fuse_file_info *fi)
+int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
 {
     int retstat = 0;
     // CACHE.init( path );
 
-    log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n",
-        path, offset, fi);
+    log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n", path, size, fi);
     log_fi(fi);
 
-    retstat = ftruncate(fi->fh, offset);
-    if (retstat < 0)
-       retstat = log_error("hradecFS_ftruncate ftruncate");
+    int res;
+    if (fi != NULL)
+            res = ftruncate(fi->fh, size);
+    else
+            res = truncate(path, size);
+    if (res == -1)
+            return -errno;
+    return 0;
 
-    return retstat;
+
+    // retstat = ftruncate(fi->fh, offset);
+    // if (retstat < 0)
+    //    retstat = log_error("hradecFS_ftruncate ftruncate");
+    //
+    // return retstat;
 }
 
 /**
@@ -1112,7 +1132,7 @@ int hradecFS_fgetattr(const char *path, struct stat *statbuf, struct fuse_file_i
     // special case of a path of "/", I need to do a getattr on the
     // underlying root directory instead of doing the fgetattr().
     if (!strcmp(path, "/"))
-       return hradecFS_getattr(path, statbuf);
+       return hradecFS_getattr(path, statbuf, fi);
 
     retstat = fstat(fi->fh, statbuf);
     if (retstat < 0)
@@ -1129,7 +1149,7 @@ struct hradecFS_oper_struc : fuse_operations  {
         getattr = hradecFS_getattr;
         readlink = hradecFS_readlink;
         // no .getdir -- that's deprecated
-        getdir = NULL;
+        // getdir = NULL;
         mknod = hradecFS_mknod;
         mkdir = hradecFS_mkdir;
         unlink = hradecFS_unlink;
@@ -1164,8 +1184,8 @@ struct hradecFS_oper_struc : fuse_operations  {
         init = hradecFS_init;
         destroy = hradecFS_destroy;
         access = hradecFS_access;
-        ftruncate = hradecFS_ftruncate;
-        fgetattr = hradecFS_fgetattr;
+        truncate = hradecFS_ftruncate;
+        // fgetattr = hradecFS_fgetattr;
     }
 };
 static struct hradecFS_oper_struc hradecFS_oper;
@@ -1236,7 +1256,21 @@ int main(int argc, char *argv[])
     char rootdir[8192];
 
 
-    fprintf(stderr, "1");
+    string reset    ="\033[0m";
+    string green    ="\033[0;32m";
+    string bgreen   ="\033[1;32m";
+    string red      ="\033[0;31m";
+    string bred     ="\033[1;31m";
+    string yellow   ="\033[0;33m";
+    string byellow  ="\033[1;33m";
+    string blue     ="\033[0;34m";
+    string bblue    ="\033[1;34m";
+    string magenta  ="\033[0;35m";
+    string bmagenta ="\033[1;35m";
+    string cyan     ="\033[0;36m";
+    string bcyan    ="\033[1;36m";
+
+
     // bbfs doesn't do any access checking on its own (the comment
     // blocks in fuse.h mention some of the functions that need
     // accesses checked -- but note there are other functions, like
@@ -1253,7 +1287,7 @@ int main(int argc, char *argv[])
     // }
 
     // See which version of fuse we're running
-    fprintf(stderr, "Fuse library version %d.%d\n", FUSE_MAJOR_VERSION, FUSE_MINOR_VERSION);
+    fprintf(stderr, "\n%sFuse library version %d.%d\n", bgreen.c_str(), FUSE_MAJOR_VERSION, FUSE_MINOR_VERSION);
 
     // Perform some sanity checking on the command line:  make sure
     // there are enough arguments, and that neither of the last two
@@ -1264,7 +1298,7 @@ int main(int argc, char *argv[])
         hradecFS_usage();
 
 
-    hradecFS_data = malloc(sizeof(struct hradecFS_state));
+    hradecFS_data = (struct hradecFS_state *) malloc(sizeof(struct hradecFS_state));
     if (hradecFS_data == NULL) {
         perror("main calloc");
         exit(-1);
@@ -1285,7 +1319,7 @@ int main(int argc, char *argv[])
     sprintf(__cacheDir,"%s_cachedir", hradecFS_data->mountdir);
     //sprintf(__syncCommand,"/bin/rsync -avpPz -e '/bin/ssh -p 22002' atomo2.no-ip.org:/ZRAID/atomo/%%s %%s");
     sprintf(__syncCommand,"/bin/rsync -avpP %%s %%s");
-    fprintf(stderr, "1\n");
+    // fprintf(stderr, "1\n");
 
     char *nargv[10];
     int nargc=0;
@@ -1298,26 +1332,26 @@ int main(int argc, char *argv[])
                 sprintf(__cacheDir, argv[nn+1]);
                 nn++;
             }else{
-                nargv[nargc] = calloc(strlen(argv[nn])+1, sizeof(char));
+                nargv[nargc] = (char *) calloc(strlen(argv[nn])+1, sizeof(char));
                 strcpy(nargv[nargc++], argv[nn]);
             }
         }else{
-            nargv[nargc] = calloc(strlen(argv[nn])+1, sizeof(char));
+            nargv[nargc] = (char *) calloc(strlen(argv[nn])+1, sizeof(char));
             strcpy(nargv[nargc++], argv[nn]);
         }
-        fprintf(stderr, "..%d...%s..\n", strlen(nargv[nn])+1, nargv[nn]);
+        // fprintf(stderr, "..%d...%s..\n", strlen(nargv[nn])+1, nargv[nn]);
     }
-    fprintf(stderr, "1\n");
 
     // create a log pipe at /tmp/.bbfs.log
     // so if we want to see the log, just run "tail -f /tmp/.bbfs.log"
     hradecFS_data->logfile = log_open_pipe();
 
-    fprintf(stderr, "hradecFS_data->rootdir     : [%s]\n", hradecFS_data->rootdir);
-    fprintf(stderr, "hradecFS_data->mountdir    : [%s]\n", hradecFS_data->mountdir);
-    fprintf(stderr, "hradecFS_data->syncCommand : [%s]\n", hradecFS_data->syncCommand);
-    fprintf(stderr, "hradecFS_data->cachedir    : [%s]\n", hradecFS_data->cachedir);
-
+    fprintf( stderr, "\n");
+    fprintf( stderr, "%shradecFS_data->rootdir     : [ %s ]\n", byellow.c_str(), (bblue+hradecFS_data->rootdir+byellow).c_str() );
+    fprintf( stderr, "%shradecFS_data->syncCommand : [ %s ]\n", byellow.c_str(), (bblue+hradecFS_data->syncCommand+byellow).c_str() );
+    fprintf( stderr, "%shradecFS_data->mountdir    : [ %s ]\n", byellow.c_str(), (bblue+hradecFS_data->mountdir+byellow).c_str() );
+    fprintf( stderr, "%shradecFS_data->cachedir    : [ %s ]\n", byellow.c_str(), (bblue+hradecFS_data->cachedir+byellow).c_str() );
+    fprintf( stderr, (reset+"\n").c_str() );
 
 
     mkdir_p( hradecFS_data->mountdir, 0777 ) ;
@@ -1326,7 +1360,7 @@ int main(int argc, char *argv[])
 
 
     // turn over control to fuse
-    fprintf(stderr, "about to call fuse_main\n");
+    // fprintf( stderr, "about to call fuse_main\n\n%s", reset.c_str() );
     strcpy( nargv[nargc-2], nargv[nargc-1] );
     nargv[nargc-1][0] = 0;
     nargc--;
