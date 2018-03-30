@@ -404,8 +404,10 @@ class __cache {
                 //     doCachePathDir(path, __depth+1);
                 //}
             }else{
-                mkdir( localPath(path), statbuf->st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
+                // mkdir( localPath(path), statbuf->st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
                 // symlink("NOT_DIR_FILE_OR_LINK_REMOTELY", localPath(path));
+                localFileNotExist( path );
+                return;
             }
             localFileExist(path);
         }
@@ -542,8 +544,9 @@ class __cache {
                         struct stat statbuf;
                         lstat(m_cache[path]["cacheFile_log"].c_str(), &statbuf);
                         remove( m_cache[path]["cacheFile_log"].c_str() );
-                        creat( m_cache[path]["cacheFile_log"].c_str(), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
-                        creat( localPath(path), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
+                        // creat( m_cache[path]["cacheFile_log"].c_str(), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
+                        // creat( localPath(path), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
+                        localFileExist(path);
                         return true;
                     }
                 }

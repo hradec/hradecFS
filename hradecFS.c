@@ -1047,7 +1047,7 @@ int hradecFS_access(const char *path, int mask)
     int retstat = -1;
     const char *__path=path;
     char fpath[PATH_MAX];
-
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_access  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     CACHE.init( path );
 
     // DIR_CACHE_INIT(path);
@@ -1104,16 +1104,23 @@ int hradecFS_access(const char *path, int mask)
 int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
 {
     int retstat = 0;
-    // CACHE.init( path );
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_ftruncate  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    CACHE.init( path );
 
     log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n", path, size, fi);
-    log_fi(fi);
+    // log_fi(fi);
 
-    int res;
-    if (fi != NULL)
-            res = ftruncate(fi->fh, size);
-    else
-            res = truncate(path, size);
+    int res=-1;
+
+    if( CACHE.existsRemote(path) ){
+        res = truncate( CACHE.localPath( path ), size);
+    }
+    // if (fi != NULL)
+    //         res = ftruncate(fi->fh, size);
+    // else
+    //         res = truncate(path, size);
+
+    log_msg( "truncate return: %d", res);
     if (res == -1)
             return -errno;
     return 0;
