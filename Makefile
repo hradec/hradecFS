@@ -9,8 +9,6 @@
 #
 
 
-
-
 AWK = gawk
 CC = g++
 # CCDEPMODE = depmode=gcc3
@@ -36,42 +34,31 @@ LIBS =
 LTLIBOBJS =
 MKDIR_P = /usr/sbin/mkdir -p
 OBJEXT = o
-PACKAGE = fuse-tutorial
 SHELL = /bin/sh
-
 
 OBJECTS=$(shell ls *.c | sed 's/\.c/.o /g')
 # $(info $(bbfs_OBJECTS))
 FUSE_LIBS =  -lfuse3 -pthread
 
-
-
-
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
 	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
-
 
 .SUFFIXES:
 .SUFFIXES: .c .o .obj
 
+all: hradecFS
 
 hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
-	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
 	rm -f hradecFS$(EXEEXT)
 	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
 
 
-all: hradecFS
-
-
 TEST_FS=/ZRAID2/atomo/
 
-test: all
+test: all cleanTest
 	$(MKDIR_P) /tmp/xx
-	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
-	./hradecFS  $(TEST_FS)/ /tmp/xx
+	sudo ./hradecFS -o allow_other $(TEST_FS)/ /tmp/xx
 	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
-
 
 .c.o:
 	$(COMPILE) -MT $@ -MD -MP $(FUSE_CFLAGS) $(CFLAGS) -c -o $@ $<
@@ -82,8 +69,20 @@ test: all
 	# $(AM_V_CC_no)$(COMPILE) -c -o $@ $<
 
 
-clean:
-	@rm -fv *.o
-	@rm -fv *.d
-	@rm -fv hradecFS
-	@rm -fv a.out
+cleanTest:
+	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
+	sudo umount /tmp/xx || echo "Not Mounted!"
+	rm -rf /tmp/xx
+
+cleanTestAll: cleanTest
+	sudo rm -rf /tmp/xx_cachedir
+
+clean: cleanTest
+	rm -fv *.o
+	rm -fv *.d
+	rm -f hradecFS$(EXEEXT)
+	rm -fv a.out
+
+nuke: clean cleanTestAll
+cleanAll: nuke
+depclean: nuke

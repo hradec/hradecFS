@@ -197,6 +197,7 @@ void log_msg(const char *format, ...)
         tmp = boost::replace_all_copy( tmp, "hradecFS: hradecFS:", green+"hradecFS:"+bgreen+"=======================================  "+reset );
         tmp = boost::replace_all_copy( tmp, "hradecFS:", green+"hradecFS:"+reset );
         tmp = boost::replace_all_copy( tmp, "REMOTE", bred+"REMOTE" );
+        tmp = boost::replace_all_copy( tmp, "!!!", bred+"!!!" );
         tmp = boost::replace_all_copy( tmp, "exist", yellow+"exist" );
         tmp = boost::replace_all_copy( tmp, ">>>", bblue+">>>" );
         tmp = boost::replace_all_copy( tmp, "===", cyan+"===" );
