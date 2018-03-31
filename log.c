@@ -309,6 +309,7 @@ void log_conn(struct fuse_conn_info *conn)
 // Duplicated here for convenience.
 void log_fi (struct fuse_file_info *fi)
 {
+    return;
     log_msg("    fi:\n");
 
     /** Open flags.  Available in open() and release() */

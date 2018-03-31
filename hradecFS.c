@@ -116,8 +116,8 @@ int hradecFS_fgetattr(const char *path, struct stat *statbuf, struct fuse_file_i
 {
     int retstat = 0;
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_fgetattr  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    log_msg("\nhradecFS_fgetattr(path=\"%s\", statbuf=0x%08x, fi=0x%08x)\n", path, statbuf, fi);
-    log_fi(fi);
+    // log_msg("\nhradecFS_fgetattr(path=\"%s\", statbuf=0x%08x, fi=0x%08x)\n", path, statbuf, fi);
+    // log_fi(fi);
 
     // On FreeBSD, trying to do anything with the mountpoint ends up
     // opening it, and then using the FD for an fgetattr.  So in the
@@ -155,7 +155,7 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
         //dp = opendir(CACHE.remotePath(path));
         CACHE.doCachePathParentDir( path );
         CACHE.doCachePathDir( path );
-        log_msg("CACHE.doCachePathDir(%s)   hradecFS_opendir(path=\"%s\", fi=0x%08x)\n",path, CACHE.remotePath(path), fi);
+        // log_msg("CACHE.doCachePathDir(%s)   hradecFS_opendir(path=\"%s\", fi=0x%08x)\n",path, CACHE.remotePath(path), fi);
     }
 
 
@@ -170,7 +170,7 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
 
     fi->fh = (intptr_t) dp;
 
-    log_fi(fi);
+    // log_fi(fi);
     return retstat;
 }
 
@@ -235,7 +235,7 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
     } //while ((de = readdir(dp)) != NULL);
 
     closedir( dp );
-    log_fi(fi);
+    // log_fi(fi);
 
     return retstat;
 }
@@ -247,7 +247,7 @@ int hradecFS_releasedir(const char *path, struct fuse_file_info *fi)
 
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_releasedir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     // CACHE.init( path );
-    log_fi(fi);
+    // log_fi(fi);
     closedir((DIR *) (uintptr_t) fi->fh);
     return retstat;
 }
@@ -306,6 +306,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
     // make a fifo, but saying it should never actually be used for
     // that.
     CACHE.localPathLog( path, ".__local__" );
+    pthread_mutex_lock(&mutex);
     if (S_ISREG(mode)) {
         remove( CACHE.localPath( path ) );
         remove( CACHE.localPathLog( path ) );
@@ -334,6 +335,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
         CACHE.localFileNotExistRemove( path );
 
     }
+    pthread_mutex_unlock(&mutex);
     return retstat;
 }
 
@@ -470,19 +472,20 @@ int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_ftruncate  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
     CACHE.init( path );
 
-    log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n", path, size, fi);
-    log_fi(fi);
+    // log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n", path, size, fi);
+    // log_fi(fi);
 
     int res=-1;
 
     if (fi != NULL){
-            res = ftruncate(fi->fh, size);
+        log_msg("\n\tftruncate(path=\"%s\")\n", path);
+        res = ftruncate(fi->fh, size);
     }else{
-        if( CACHE.existsRemote(path) ){
-            res = truncate( CACHE.localPath( path ), size);
-        }
+        log_msg("\n\ttruncate(path=\"%s\")\n", path);
+        res = log_syscall("truncate", truncate( CACHE.localPath( path ), size), 0);
     }
     if( res == 0 ){
+        log_msg("\ntruncate(path=\"%s\") - localFileExist\n", path);
         CACHE.localFileExist( path );
     }else{
         return -errno;
@@ -547,7 +550,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
     // check if a log file has "100%", which means the file is synced OK!!
     // if this is the case, just skip all the shananigans!
-    if( exists( CACHE.localPathLog(path) ) && grep( CACHE.localPathLog(path), "100%" ) && CACHE.fileInSync(path) ){
+    if( CACHE.fileInSync(path) ){
         log_msg( "\n !!! already cached %s = %s\n", path, CACHE.localPathLog(path));
 
     // we don't have the file locally, so lets cache it!
@@ -617,25 +620,15 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 // and pipe the output to the log file!
                 sprintf( cmd, "%s >> %s 2>&1", tmp, CACHE.localPathLog(path) );
 
+                // run the cmd now!
                 log_msg( cmd );
                 log_msg("\n\t!!! rsync system return: %d", system( cmd ) );
 
-                // not sure why, but we need to pause after the system call
-                // or else we can't open the file for some reason!!
-                sleep(1);
-
-                // just to make sure, we set a loop to wait the size of the file
-                // to match the remoteSize, so we can open it!!
-                count=0;
-                while( remoteSize != getFileSize(CACHE.localPath(path)) && count<5  ){
-                    sleep(1);
-                    count++;
-                }
-
-                // if count is more than 5 seconds, something is wrong!!
-                if( count>4 ) {
-                    log_msg("\n\ntransfer failed!!!\n\n");
-                }
+                // we need to make sure the cache from rsync is flushed before
+                // we can open it here
+                // TODO: we need to implement the same, but with SYNCFS() instead, so
+                //       not all filesystems need to be flushed. Just the one!!
+                sync();
 
                 // rsync done, so we lock threads and remove lockfile!
                 pthread_mutex_lock(&mutex);
@@ -657,7 +650,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
     fi->fh = fd;
 
-    log_fi(fi);
+    // log_fi(fi);
 
 
     return retstat;
@@ -720,7 +713,7 @@ int hradecFS_flush(const char *path, struct fuse_file_info *fi)
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_flush  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     log_msg("\nhradecFS_flush(path=\"%s\", fi=0x%08x)\n", path, fi);
     // no need to get fpath on this one, since I work from fi->fh not the path
-    log_fi(fi);
+    // log_fi(fi);
 
     return 0;
 }
@@ -747,9 +740,9 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
 int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_fsync  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
-    log_msg("\nhradecFS_fsync(path=\"%s\", datasync=%d, fi=0x%08x)\n",
-        path, datasync, fi);
-    log_fi(fi);
+    // log_msg("\nhradecFS_fsync(path=\"%s\", datasync=%d, fi=0x%08x)\n",
+    //     path, datasync, fi);
+    // log_fi(fi);
 
     // some unix-like systems (notably freebsd) don't have a datasync call
     #ifdef HAVE_FDATASYNC
@@ -845,35 +838,11 @@ int hradecFS_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
     int retstat = 0;
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_fsyncdir  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
 
-    log_msg("\nhradecFS_fsyncdir(path=\"%s\", datasync=%d, fi=0x%08x)\n",
-        path, datasync, fi);
-    log_fi(fi);
+    // log_msg("\nhradecFS_fsyncdir(path=\"%s\", datasync=%d, fi=0x%08x)\n",
+        // path, datasync, fi);
+    // log_fi(fi);
 
     return retstat;
-}
-
-//===================================================================================================================
-void *hradecFS_init(struct fuse_conn_info *conn, fuse_config *fc)
-{
-    log_conn( conn );
-    log_fuse_context( fuse_get_context() );
-
-    pthread_mutex_lock(&mutex);
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    CACHE.cleanupBeforeStart();
-
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    CACHE.cleanupCache();
-    pthread_mutex_unlock(&mutex);
-
-    // do the initial cache of the root folder
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    CACHE.doCachePathDir( "/" );
-
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
-    // std::thread t1(task1, cleanupCache);
-
-    return BB_DATA;
 }
 
 //===================================================================================================================
@@ -917,6 +886,29 @@ int hradecFS_access(const char *path, int mask)
 }
 
 
+//===================================================================================================================
+void *hradecFS_init(struct fuse_conn_info *conn, fuse_config *fc)
+{
+    log_conn( conn );
+    log_fuse_context( fuse_get_context() );
+
+    pthread_mutex_lock(&mutex);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    CACHE.cleanupBeforeStart();
+
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    CACHE.cleanupCache();
+    pthread_mutex_unlock(&mutex);
+
+    // do the initial cache of the root folder
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    CACHE.doCachePathDir( "/" );
+
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_init  \n>>>>>>>>>>>>>>>>>>>>>>>>>>\n");
+    // std::thread t1(task1, cleanupCache);
+
+    return BB_DATA;
+}
 
 //===================================================================================================================
 struct hradecFS_oper_struc : fuse_operations  {

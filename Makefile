@@ -13,7 +13,7 @@ AWK = gawk
 CC = g++
 # CCDEPMODE = depmode=gcc3
 CFLAGS = -g -O3
-# CFLAGS = -g
+CFLAGS = -g
 CPP = g++ -E
 LINK=g++
 CPPFLAGS =
@@ -55,12 +55,12 @@ hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
 
 TEST_FS=/ZRAID2/atomo/
 
-test: all cleanTest
+test: all cleanTest upload
 	$(MKDIR_P) /tmp/xx
 	sudo ./hradecFS -o allow_other $(TEST_FS)/ /tmp/xx
 	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
 
-.c.o:
+.c.o: cache.h
 	$(COMPILE) -MT $@ -MD -MP $(FUSE_CFLAGS) $(CFLAGS) -c -o $@ $<
 	# $(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
 	# $(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po
@@ -68,6 +68,9 @@ test: all cleanTest
 	# DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) \
 	# $(AM_V_CC_no)$(COMPILE) -c -o $@ $<
 
+
+upload:
+	cp -rfv ./hradecFS /ZRAID2/
 
 cleanTest:
 	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true

@@ -42,6 +42,16 @@
 #include <utime.h>
 
 
+static pthread_mutex_t mutex_umask;
+mode_t getUmask(void){
+    mode_t _umask;
+    pthread_mutex_lock(&mutex_umask);
+    _umask = umask(0);
+    umask( _umask );
+    pthread_mutex_unlock(&mutex_umask);
+    return _umask;
+}
+
 
 inline std::vector<std::string> glob(const std::string& pat){
     using namespace std;
