@@ -18,7 +18,7 @@ CPP = g++ -E
 LINK=g++
 CPPFLAGS =
 CYGPATH_W = echo
-# DEFS = -DHAVE_CONFIG_H
+DEFS =
 DEPDIR = .deps
 ECHO_C =
 ECHO_N = -n
@@ -53,12 +53,22 @@ hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
 	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
 
 
-TEST_FS=/ZRAID2/atomo/
+TEST_FS=/ZRAID2/
+
+
 
 test: all cleanTest upload
 	$(MKDIR_P) /tmp/xx
-	sudo ./hradecFS -o allow_other $(TEST_FS)/ /tmp/xx
+	sudo su - -c "$(shell pwd)/hradecFS -o allow_other $(TEST_FS)/ /tmp/xx"
 	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
+
+
+debug: all cleanTest upload
+	$(MKDIR_P) /tmp/xx
+	sudo su - -c "$(shell pwd)/hradecFS -d -o allow_other $(TEST_FS)/ /tmp/xx > /tmp/debug.log &"
+	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
+	tail -f /tmp/debug.log
+
 
 .c.o: cache.h
 	$(COMPILE) -MT $@ -MD -MP $(FUSE_CFLAGS) $(CFLAGS) -c -o $@ $<
@@ -73,8 +83,9 @@ upload:
 	cp -rfv ./hradecFS /ZRAID2/
 
 cleanTest:
-	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount $$(mount | grep hradecFS | awk '{print $$3}') || true
-	sudo umount /tmp/xx || echo "Not Mounted!"
+	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount -f -l $$(mount | grep hradecFS | awk '{print $$3}') || true
+	# sudo pkill -fc -9  "./hradecFS -o allow_other" || echo "killed hradecFS"
+	sudo umount -f -l  /tmp/xx || echo "Not Mounted!"
 	rm -rf /tmp/xx
 
 cleanTestAll: cleanTest

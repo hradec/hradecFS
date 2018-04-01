@@ -12,9 +12,19 @@
 
 #ifndef FUSE_USE_VERSION
 
-#define FUSE_USE_VERSION 30
+#define FUSE_USE_VERSION 32
+
+// we need this for touch to work (and also to properly work with NFS)
+// this fixes SETATTR "function not implemented" error!
+#define HAVE_UTIMENSAT
 
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_lowlevel.h>
+
+
+#ifdef linux
+/* For pread()/pwrite()/utimensat() */
+#define _XOPEN_SOURCE 700
+#endif
 
 #endif

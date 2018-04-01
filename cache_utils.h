@@ -18,6 +18,7 @@
 #include <iostream>
 #include <cstdarg>
 #include <thread>
+#include <sstream>
 #include <time.h>
 #include <boost/algorithm/string/replace.hpp>
 
@@ -27,6 +28,16 @@ typedef struct stat _stat;
 
 static pthread_mutex_t mutex;
 
+
+vector<string> split(const string &s, char delim) {
+    stringstream ss(s);
+    string item;
+    vector<string> tokens;
+    while (getline(ss, item, delim)) {
+        tokens.push_back(item);
+    }
+    return tokens;
+}
 
 //missing string printf
 //this is safe and convenient but not exactly efficient

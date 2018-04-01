@@ -107,7 +107,7 @@ int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *fil
     }
     retstat = CACHE.stat( path, statbuf );
 
-    log_msg("\nREMOTE RETURN  hradecFS_getattr_cache - %s - return %d", path, retstat);
+    log_msg("\nREMOTE RETURN  hradecFS_getattr_cache - %s - return %d\n", path, retstat);
     return retstat;
 }
 
@@ -306,7 +306,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
     // make a fifo, but saying it should never actually be used for
     // that.
     CACHE.localPathLog( path, ".__local__" );
-    pthread_mutex_lock(&mutex);
+    // pthread_mutex_lock(&mutex);
     if (S_ISREG(mode)) {
         remove( CACHE.localPath( path ) );
         remove( CACHE.localPathLog( path ) );
@@ -328,14 +328,18 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
         // create a log file for the newly created file!
         // we must add "100%" in it to fool openDir so
         // it WON'T try to pull it from remote!
-        int file = creat( CACHE.localPathLog( path ), mode );
-        string tmp = _format( "%s*%lld\n100%\n)", CACHE.localPath( path ) , -1 );
-        write( file, tmp.c_str(),  tmp.length() );
-        close( file );
-        CACHE.localFileNotExistRemove( path );
+        // string tmp = _format( "%s*%lld\n100%\n)", CACHE.localPath( path ) , 0 );
+        //
+        // pthread_mutex_lock(&__mutex_localFileExist);
+        // int file = creat( CACHE.localPathLog( path ), mode );
+        // write( file, tmp.c_str(),  tmp.length() );
+        // close( file );
+        // pthread_mutex_unlock(&__mutex_localFileExist);
+        // CACHE.localFileNotExistRemove( path );
+        CACHE.localFileExist( path );
 
     }
-    pthread_mutex_unlock(&mutex);
+    // pthread_mutex_unlock(&mutex);
     return retstat;
 }
 
@@ -478,13 +482,14 @@ int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
     int res=-1;
 
     if (fi != NULL){
-        log_msg("\n\tftruncate(path=\"%s\")\n", path);
+        log_msg("\n\tftruncate(path=\"%s\") %d \n", path, size);
         res = ftruncate(fi->fh, size);
     }else{
-        log_msg("\n\ttruncate(path=\"%s\")\n", path);
+        log_msg("\n\ttruncate(path=\"%s\") %d \n", path, size);
         res = log_syscall("truncate", truncate( CACHE.localPath( path ), size), 0);
     }
     if( res == 0 ){
+        CACHE.localPathLog( path, ".__local__" );
         log_msg("\ntruncate(path=\"%s\") - localFileExist\n", path);
         CACHE.localFileExist( path );
     }else{
@@ -585,7 +590,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                     if( ! CACHE.fileInSync(path) ){
                         // create a lock file inside the mutex, so we can use
                         // to make others proccesses accessing this file wait rsync to finish!
-                        creat( CACHE.localPathLock(path), S_IRWXU | S_IRWXG | S_IRWXO );
+                        close( creat( CACHE.localPathLock(path), S_IRWXU | S_IRWXG | S_IRWXO ) );
                         // and now set it to rsync, so we can remove the lock!
                         rsyncIt=1;
 
@@ -682,7 +687,12 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_write  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
     CACHE.localPathLog( path, ".__local__" );
 
-    return log_syscall("pwrite", pwrite(fi->fh, buf, size, offset), 0);
+    int ret = log_syscall("pwrite", pwrite(fi->fh, buf, size, offset), 0);
+
+    // we need to update the log file here to reflect the new size of the file right
+    // after writing, since NFS call getattr right after writing, before closing the file.
+    CACHE.localFileExist( path, CACHE.no_uid );
+    return ret;
 }
 
 //===================================================================================================================
@@ -721,7 +731,7 @@ int hradecFS_flush(const char *path, struct fuse_file_info *fi)
 //===================================================================================================================
 int hradecFS_release(const char *path, struct fuse_file_info *fi)
 {
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_release  %s\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path);
+    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_release  %s - [%f]\n>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     // log_msg("\nhradecFS_release(path=\"%s\", fi=0x%08x)\n",
     //   path, fi);
     // log_fi(fi);
@@ -731,7 +741,7 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
     int ret = log_syscall("close", close(fi->fh), 0);
     if( ret == 0 ){
         CACHE.init( path );
-        CACHE.localFileExist( path );
+        CACHE.localFileExist( path, CACHE.no_uid );
     }
     return ret;
 }
