@@ -9,53 +9,45 @@
 #
 
 
-AWK = gawk
-CC = g++
-# CCDEPMODE = depmode=gcc3
-CFLAGS = -g -O3
-CFLAGS = -g
-CPP = g++ -E
-LINK=g++
-CPPFLAGS =
-CYGPATH_W = echo
-DEFS =
-DEPDIR = .deps
-ECHO_C =
-ECHO_N = -n
-ECHO_T =
-EGREP = /usr/sbin/grep -E
-EXEEXT =
+# CCDEPMODE 	= depmode=gcc3
+CFLAGS 		= -g -O3
+# CFLAGS 		= -g
+AWK 		= gawk
+CC 			= g++
+CPP 		= g++ -E
+LINK		= g++
+CYGPATH_W 	= echo
+DEPDIR 		= .deps
+ECHO_N 		= -n
+EGREP 		= /usr/sbin/grep -E
 FUSE_CFLAGS = -D_FILE_OFFSET_BITS=64 -I/usr/include/fuse -fpermissive
-FUSE_LIBS = -lfuse -pthread
-GREP = /usr/sbin/grep
-LDFLAGS =
-LIBOBJS =
-LIBS =
-LTLIBOBJS =
-MKDIR_P = /usr/sbin/mkdir -p
-OBJEXT = o
-SHELL = /bin/sh
+FUSE_LIBS 	= -lfuse -pthread
+GREP      	= /usr/sbin/grep
+EXEEXT 		=
+LDFLAGS   	=
+LIBOBJS   	=
+LIBS      	=
+LTLIBOBJS 	=
+MKDIR_P   	= /usr/sbin/mkdir -p
+OBJEXT 	  	= o
+SHELL 	  	= /bin/sh
+FUSE_LIBS 	= -lfuse3 -pthread
+OBJECTS	  	= $(shell ls *.c | sed 's/\.c/.o /g')
+DEPS	  	= $(shell ls -1 *.h)
 
-OBJECTS=$(shell ls *.c | sed 's/\.c/.o /g')
-# $(info $(bbfs_OBJECTS))
-FUSE_LIBS =  -lfuse3 -pthread
 
-COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) \
-	$(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
-
-.SUFFIXES:
-.SUFFIXES: .c .o .obj
-
-all: hradecFS
-
-hradecFS$(EXEEXT): $(OBJECTS) $(shell ls *.h)
-	rm -f hradecFS$(EXEEXT)
-	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
-
+COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 
 TEST_FS=/ZRAID2/
 
+.SUFFIXES: .c .o .obj
 
+
+all: hradecFS
+
+hradecFS$(EXEEXT): $(OBJECTS)
+	rm -f hradecFS$(EXEEXT)
+	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
 
 test: all cleanTest upload
 	$(MKDIR_P) /tmp/xx
@@ -70,7 +62,7 @@ debug: all cleanTest upload
 	tail -f /tmp/debug.log
 
 
-.c.o: cache.h
+%.o: %.c $(DEPS)
 	$(COMPILE) -MT $@ -MD -MP $(FUSE_CFLAGS) $(CFLAGS) -c -o $@ $<
 	# $(COMPILE) -MT $@ -MD -MP -MF $(DEPDIR)/$*.Tpo -c -o $@ $<
 	# $(AM_V_at)$(am__mv) $(DEPDIR)/$*.Tpo $(DEPDIR)/$*.Po

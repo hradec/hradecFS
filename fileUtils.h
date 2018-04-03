@@ -61,7 +61,7 @@ inline std::vector<std::string> glob(const std::string& pat){
     vector<string> ret;
     for(unsigned int i=0;i<glob_result.gl_pathc;++i){
         ret.push_back(string(glob_result.gl_pathv[i]));
-        log_msg("\t%s \n", string(glob_result.gl_pathv[i]).c_str() );
+        // log_msg("\t%s \n", string(glob_result.gl_pathv[i]).c_str() );
     }
     globfree(&glob_result);
     return ret;

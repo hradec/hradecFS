@@ -28,6 +28,15 @@ typedef struct stat _stat;
 
 static pthread_mutex_t mutex;
 
+std::string right(std::string const& source, size_t const length) {
+  if (length >= source.size()) { return source; }
+  return source.substr(source.size() - length);
+}
+
+std::string left(std::string const& source, size_t const length) {
+  if (length >= source.size()) { return source; }
+  return source.substr(0, length);
+}
 
 vector<string> split(const string &s, char delim) {
     stringstream ss(s);
