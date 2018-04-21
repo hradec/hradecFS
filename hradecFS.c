@@ -128,7 +128,7 @@ int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *fil
         statbuf->st_size = size;
     }
 
-    log_msg("\nREMOTE RETURN  hradecFS_getattr_cache - %s - return %d\n", path, retstat);
+    log_msg("\n====>getattr   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -153,6 +153,7 @@ int hradecFS_fgetattr(const char *path, struct stat *statbuf, struct fuse_file_i
 
     log_stat(statbuf);
 
+    log_msg("\n====>fgetattr   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -191,7 +192,7 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
 
     fi->fh = (intptr_t) dp;
 
-    // log_fi(fi);
+    log_msg("\n====>opendir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -271,7 +272,7 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
     closedir( dp );
     // log_fi(fi);
 
-    // if root folder, show up the preferences files
+    log_msg("\n====>readdir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -284,6 +285,8 @@ int hradecFS_releasedir(const char *path, struct fuse_file_info *fi)
     // CACHE.init( path );
     // log_fi(fi);
     closedir((DIR *) (uintptr_t) fi->fh);
+
+    log_msg("\n====>releasedir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -319,6 +322,8 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
         link[retstat] = '\0';
         retstat = 0;
     }
+
+    log_msg("\n====>readlink  uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -331,8 +336,6 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
     CACHE.init( path );
 
 
-    log_msg("\nhradecFS_mknod(path=\"%s\", mode=0%3o, dev=%lld)\n",
-        CACHE.localPath( path ), mode, dev);
 
 
     // On Linux this could just be 'mknod(path, mode, dev)' but this
@@ -376,6 +379,8 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 
     }
     // pthread_mutex_unlock(&mutex);
+    log_msg("\n====>mknod     uid: [%4d]  mode: [0%3o] dev: [%lld]  return: [%2d] path: %s \n", fuse_get_context()->uid, mode, dev, retstat, path);
+
     return retstat;
 }
 
@@ -398,6 +403,7 @@ int hradecFS_mkdir(const char *path, mode_t mode)
         if( ret == 0 )
             CACHE.localFileExist( path );
     }
+    log_msg("\n====>mkdir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, ret, path);
     return ret;
 }
 
@@ -412,6 +418,7 @@ int hradecFS_unlink(const char *path)
 
     CACHE.removeFile( path );
 
+    log_msg("\n====>unlink    uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, 0, path);
     return 0;
 }
 
@@ -426,6 +433,7 @@ int hradecFS_rmdir(const char *path)
 
     CACHE.removeDir( path );
 
+    log_msg("\n====>rmdir   uid: [%4d] path: %s \n", fuse_get_context()->uid, path);
     return 0;
 }
 
@@ -436,6 +444,7 @@ int hradecFS_symlink(const char *path, const char *link)
     CACHE.init( link );
 
     int ret =  log_syscall("symlink", symlink(path,  CACHE.localPath( link ) ), 0);
+    log_msg("\n====>symlink   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, ret, path);
     return ret;
 }
 
@@ -447,6 +456,8 @@ int hradecFS_rename(const char *path, const char *newpath,  unsigned int i)
     CACHE.init( newpath );
 
     int ret =  log_syscall("rename", rename( CACHE.localPath( path ), CACHE.localPath( newpath ) ), 0);
+
+    log_msg("\n====>rename   uid: [%4d]  return: [%2d] path: %s  newpath: %s \n", fuse_get_context()->uid, ret, path, newpath);
     return ret;
 }
 
@@ -458,6 +469,7 @@ int hradecFS_link(const char *path, const char *newpath)
     CACHE.init( newpath );
 
     int ret =  log_syscall("link", link( CACHE.localPath( path ), CACHE.localPath( newpath ) ), 0);
+    log_msg("\n====>link   uid: [%4d]  return: [%2d] path: %s  newpath: %s \n", fuse_get_context()->uid, ret, path, newpath);
     return ret;
 }
 
@@ -468,6 +480,8 @@ int hradecFS_chmod(const char *path, mode_t mode,  fuse_file_info *fi )
     CACHE.init( path );
 
     int ret =  log_syscall("chmod", chmod( CACHE.localPath( path ), mode), 0);
+
+    log_msg("\n====>chmod     uid: [%4d] mode: [0%3o] return: [%2d] path: %s \n",fuse_get_context()->uid,  mode, ret, path);
     return ret;
 }
 
@@ -478,6 +492,9 @@ int hradecFS_chown(const char *path, uid_t uid, gid_t gid,  fuse_file_info *fi)
     CACHE.init( path );
 
     int ret =  log_syscall("chown", chown( CACHE.localPath( path ), uid, gid), 0);
+
+    log_msg("\n====>chown   newUID: [%d] newGID: [%d] uid: [%4d]  return: [%2d] path: %s \n", uid, gid, fuse_get_context()->uid, ret, path);
+
     return ret;
 }
 
@@ -529,9 +546,11 @@ int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
         log_msg("\ntruncate(path=\"%s\") - localFileExist\n", path);
         CACHE.localFileExist( path, CACHE.no_uid );
     }else{
-        return -errno;
+        res=-errno;
     }
-    return 0;
+    log_msg("\n====>ftruncate   size: [%lld] uid: [%4d] return: [%2d] path: %s \n", size, fuse_get_context()->uid, res, path);
+
+    return res;
 }
 
 
@@ -556,8 +575,11 @@ static int hradecFS_utimens(const char *path, const struct timespec ts[2], struc
     // don't use utime/utimes since they follow symlinks
     res = utimensat(0, CACHE.localPath( path ), ts, AT_SYMLINK_NOFOLLOW);
     if (res == -1)
-        return -errno;
-    return 0;
+        res = -errno;
+
+    log_msg("\n====>utime     uid: [%4d]  return: [%2d] path: %s \n",fuse_get_context()->uid, res, path);
+
+    return res;
 }
 #endif
 
@@ -657,13 +679,15 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 // reset the log file!
                 CACHE.localFileExist( path, CACHE.no_uid );
                 // construct the rsync command call!
-                sprintf( tmp, BB_DATA->syncCommand, CACHE.remotePath(path), CACHE.localPath(path) );
+                string from = string("'") + CACHE.remotePath(path) + "'";
+                string to   = string("'") + CACHE.localPath(path) + "'";
+                sprintf( tmp, BB_DATA->syncCommand, from.c_str(), to.c_str() );
                 // and pipe the output to the log file!
-                sprintf( cmd, "%s >> %s 2>&1", tmp, CACHE.localPathLog(path) );
+                sprintf( cmd, "%s >> '%s' 2>&1", tmp, CACHE.localPathLog(path) );
 
                 // run the cmd now!
                 log_msg( cmd );
-                log_msg("\n\t!!! rsync system return: %d", system( cmd ) );
+                log_msg("\n\t!!! rsync system return: [%2d]", system( cmd ) );
 
                 // we need to make sure the cache from rsync is flushed before
                 // we can open it here
@@ -692,6 +716,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
     fi->fh = fd;
 
     // log_fi(fi);
+    log_msg("\n====>open      uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
 
 
     return retstat;
@@ -721,10 +746,10 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
                     sprintf( buf, string( p + "\n" + buf ).c_str() );
             }
         }
-        log_msg("\n====>pread   size: [% 10lld] offset: [% 10lld] read: [% 10lld] size=read: %d  uid: %d  path: %s \n", size, offset, ret, size==ret,  fuse_get_context()->uid, path);
+        ret = log_syscall("====>pread", strlen(buf), 0);
     }else{
         ret = pread(fi->fh, buf, size, offset);
-        log_msg("\n====>pread   size: [% 10lld] offset: [% 10lld] read: [% 10lld] size=read: %d  uid: %d  path: %s \n", size, offset, ret, size==ret,  fuse_get_context()->uid, path);
+        log_msg("\n====>pread     uid: [%4d] size: [%10lld] offset: [%10lld] read: [%10lld]   size=read: %d  path: %s \n", fuse_get_context()->uid, size, offset, ret, size==ret,   path);
     }
 
     return ret;
@@ -744,7 +769,7 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
     CACHE.setLocallyCreated( path );
 
     int ret = log_syscall("pwrite", pwrite(fi->fh, buf, size, offset), 0);
-    log_msg("\n====>pwrite  size: [% 10lld] offset: [% 10lld] read: [% 10lld] size=read: %d  uid: %d  path: %s \n", size, offset, ret, size==ret,  fuse_get_context()->uid, path);
+    log_msg("\n====>pwrite    uid: [%4d]  size: [%10lld] offset: [%10lld] write: [%10lld] size=read: %d  path: %s \n", fuse_get_context()->uid, size, offset, ret, size==ret, path);
 
     // we need to update the log file here to reflect the new size of the file right
     // after writing, since NFS call getattr right after writing, before closing the file.
@@ -771,6 +796,8 @@ int hradecFS_statfs(const char *path, struct statvfs *statv)
 
     log_statvfs(statv);
 
+    log_msg("\n====>statfs    uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
+
     return retstat;
 }
 
@@ -783,10 +810,15 @@ int hradecFS_statfs(const char *path, struct statvfs *statv)
 int hradecFS_flush(const char *path, struct fuse_file_info *fi)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_flush  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
-    log_msg("\nhradecFS_flush(path=\"%s\", fi=0x%08x)\n", path, fi);
-    // no need to get fpath on this one, since I work from fi->fh not the path
-    // log_fi(fi);
+    int res = -1;
 
+    if( fi->fh != NULL )
+        res = log_syscall("fsync", fsync(fi->fh), 0);
+
+    if( res == 0 )
+        CACHE.localFileExist( path );
+
+    log_msg("\n====>flush     uid: [%4d]  path: %s\n", fuse_get_context()->uid, path);
     return 0;
 }
 
@@ -805,6 +837,8 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
         CACHE.init( path );
         CACHE.localFileExist( path, CACHE.no_uid );
     }
+    log_msg("\n====>release   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, ret, path);
+
     return ret;
 }
 
@@ -817,12 +851,19 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     // log_fi(fi);
 
     // some unix-like systems (notably freebsd) don't have a datasync call
+    int res = -1;
     #ifdef HAVE_FDATASYNC
         if (datasync)
-            return log_syscall("fdatasync", fdatasync(fi->fh), 0);
+            res = log_syscall("fdatasync", fdatasync(fi->fh), 0);
         else
     #endif
-        return log_syscall("fsync", fsync(fi->fh), 0);
+        res = log_syscall("fsync", fsync(fi->fh), 0);
+
+    if( res == 0 )
+        CACHE.localFileExist( path );
+
+    log_msg("\n====>fsync     uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, res, path);
+    return res;
 }
 
 //===================================================================================================================
@@ -838,7 +879,10 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
         // hradecFS_fullpath(fpath, path);
         CACHE.init( path );
 
-        return log_syscall("lsetxattr", lsetxattr(CACHE.localPath( path ), name, value, size, flags), 0);
+        int ret = log_syscall("lsetxattr", lsetxattr(CACHE.localPath( path ), name, value, size, flags), 0);
+
+        log_msg("\n====>setxtr uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, ret, path);
+        return ret;
     }
 
     //===================================================================================================================
@@ -858,6 +902,7 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
         if (retstat >= 0)
         log_msg("    value = \"%s\"\n", value);
 
+        log_msg("\n====>getxtr uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, retstat, path);
         return retstat;
     }
 
@@ -883,6 +928,7 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
             log_msg("    \"%s\"\n", ptr);
         }
 
+        log_msg("\n====>lstxtr uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, retstat, path);
         return retstat;
     }
 
@@ -898,7 +944,9 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
         // hradecFS_fullpath(fpath, path);
         CACHE.init( path );
 
-        return log_syscall("lremovexattr", lremovexattr(CACHE.localPath( path ), name), 0);
+        int retstat = log_syscall("lremovexattr", lremovexattr(CACHE.localPath( path ), name), 0);
+        log_msg("\n====>remxtr uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, retstat, path);
+        return retstat;
     }
 #endif
 
@@ -914,6 +962,7 @@ int hradecFS_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
         // path, datasync, fi);
     // log_fi(fi);
 
+    log_msg("\n====>fsyncdir  uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -921,6 +970,7 @@ int hradecFS_fsyncdir(const char *path, int datasync, struct fuse_file_info *fi)
 void hradecFS_destroy(void *userdata)
 {
     log_msg( "\nhradecFS_destroy(userdata=0x%08x)\n", userdata );
+    log_msg("\n====>destroy   uid: [%4d]\n", fuse_get_context()->uid);
 }
 
 //===================================================================================================================
@@ -954,6 +1004,7 @@ int hradecFS_access(const char *path, int mask)
     if (retstat < 0)
        retstat = log_error("hradecFS_access access");
 
+    log_msg("\n====>access    uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 

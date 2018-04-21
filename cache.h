@@ -195,6 +195,12 @@ class __cache {
                 remove( files4[i].c_str() );
             }
 
+            // and finally logs. We can remove logs to force the remote size of files to be updated
+            vector<string> files5 = glob(_cacheControl() + "*.hradecFS" );
+            for ( unsigned int i = 0; i < files5.size(); i++ ) {
+                remove( files5[i].c_str() );
+            }
+
             // account for local created files!!
             files4 = glob(_cacheControl() + "*__local__" );
             for ( unsigned int i = 0; i < files4.size(); i++ ) {
@@ -247,14 +253,15 @@ class __cache {
                     log_msg("\n!!! 11\n");
                     struct stat statbufLog;
                     // if local path uid/gid is root, use uid/gid of log file!
-                    // if( statbuf->st_uid==0 || statbuf->st_gid==0 ){
-                    //     if( lstat( localPathLog(path), &statbufLog ) == 0 ){
-                    //         statbuf->st_uid = statbufLog.st_uid ;
-                    //         statbuf->st_gid = statbufLog.st_gid;
-                    //         // and fix the local file uid/gid, so we don't have to do this again!
-                    //         chown( localPath(path), statbuf->st_uid, statbuf->st_gid );
-                    //     }
-                    // }
+                    if( statbuf->st_uid==0 || statbuf->st_gid==0 ){
+                        if( lstat( localPathLog(path), &statbufLog ) == 0 ){
+                            statbuf->st_uid = statbufLog.st_uid ;
+                            statbuf->st_gid = statbufLog.st_gid;
+                            // and fix the local file uid/gid, so we don't have to do this again!
+                            // chown( localPath(path), statbuf->st_uid, statbuf->st_gid );
+                            setStats( path, statbuf );
+                        }
+                    }
                     uid = statbuf->st_uid;
                 }else if( existsRemote( path ) ){
                     retstat = lstat( remotePath(path), statbuf );
@@ -481,22 +488,33 @@ class __cache {
                     // if no stat, there's no file yet!!
                     // so we set a standard stat for the file here
                     statbuf.st_mode  = parent_statbuf.st_mode;
-                    statbuf.st_uid   = fuse_get_context()->uid;
-                    statbuf.st_gid   = fuse_get_context()->gid;
                     statbuf.st_atime = time(NULL);
                     statbuf.st_ctime = time(NULL);
+                    if( caller != no_uid && fuse_get_context()->uid != 0 ){
+                        statbuf.st_uid   = fuse_get_context()->uid;
+                        statbuf.st_gid   = fuse_get_context()->gid;
+                    }
                 }
                 // linkSuffix   = ".__link_local__";
                 // folderSuffix = ".__folder_local__";
                 // fileSuffix   = ".__local__";
             };
 
-            if( localFile && caller != no_uid ){
-                statbuf.st_uid   = fuse_get_context()->uid;
-                statbuf.st_gid   = fuse_get_context()->gid;
+            if( localFile ){
+                if( caller != no_uid && fuse_get_context()->uid != 0 ){
+                    statbuf.st_uid   = fuse_get_context()->uid;
+                    statbuf.st_gid   = fuse_get_context()->gid;
+                }
                 statbuf.st_mtime = time(NULL);
                 statbuf.st_atime = time(NULL);
             }
+
+            // if the file uid/gid is zero, force the uid/gid of the caller user
+            // hopefully this will fix permissions if something goes wrong
+            if( statbuf.st_uid == 0 )
+                statbuf.st_uid = fuse_get_context()->uid;
+            if( statbuf.st_gid == 0 )
+                statbuf.st_gid = fuse_get_context()->gid;
 
             if ( ! exists( localPath( path ) ) ) {
                 close( creat( localPath( path ), statbuf.st_mode & ( S_IRWXU | S_IRWXG | S_IRWXO ) ) );
@@ -542,7 +560,7 @@ class __cache {
             statbuf.st_atime = time(NULL);
             setStats( localPathLog( path ), &statbuf);
 
-            log_msg( "\n >>> create skeleton %s --> %s \n",  localPathLog( path ), localPath( path ) );
+            log_msg( "\n !!! localFileExist: create skeleton %s --> %s \n",  localPathLog( path ), localPath( path ) );
         }
 
         void doCachePath(string path, int __depth=0){
@@ -691,7 +709,7 @@ class __cache {
             return ret;
         }
 
-        bool existsRemote(string path, bool checkLocal=true, int depth=0){
+        bool existsRemote(string path, int depth=0){
             // if the file or the folder the files is in doenst exist in the remote filesystem, return NotExist
             // this is a HUGE speedup for searchpaths, like PYTHONPATH!!!
             // string __dir=_dirname(path);
@@ -712,22 +730,19 @@ class __cache {
                 return false;
             }
 
-            // we need turn this  on/off for files that only exist locally (fileInSync)
-            if(checkLocal){
-                // if dir is cached or exists locally, means it exists remotely!
-                // if it was deleted remotely, theres another thread wich will delete it locally,
-                // so we don't have to check remotely here!!
-                log_msg("\nexistsRemote -> second if existLocal(%s)\n", localPath(path));
-                if ( existsLocal(path) ){
-                    if( isdir(localPath(path)) ){
-                        // doCachePathDir( path );
-                        log_msg("\nexistsRemote -> second if - is dir %s\n",localPath(path) );
-                        return true;
-                    } else {
-                        bool ret = exists( localPathLog(path) );
-                        log_msg("\nexistsRemote -> second if - return true - log exists = %d - %s\n",ret, localPathLog(path) );
-                        return true;
-                    }
+            // if dir is cached or exists locally, means it exists remotely!
+            // if it was deleted remotely, theres another thread wich will delete it locally,
+            // so we don't have to check remotely here!!
+            log_msg("\nexistsRemote -> second if existLocal(%s)\n", localPath(path));
+            if ( existsLocal(path) ){
+                if( isdir(localPath(path)) ){
+                    // doCachePathDir( path );
+                    log_msg("\nexistsRemote -> second if - is dir %s\n",localPath(path) );
+                    return true;
+                } else {
+                    bool ret = exists( localPathLog(path) );
+                    log_msg("\nexistsRemote -> second if - return true - log exists = %d - %s\n",ret, localPathLog(path) );
+                    return true;
                 }
             }
 
@@ -736,20 +751,18 @@ class __cache {
             // query remotely!!
             // if it shows up remotely, the refresh thread should make it appears locally,
             // so the previous if will make it return true!
-            log_msg("\nexistsRemote -> third if - %s %d %d\n", path.c_str(), isDirCached( _dirname(path) ),checkLocal );
+            log_msg("\nexistsRemote -> third if - %s %d\n", path.c_str(), isDirCached( _dirname(path) ) );
             if ( isDirCached( _dirname(path) ) ){
-                if(checkLocal){
-                    // if the cachefile log file exists, means the file exists remotely, But
-                    // was deleted locally in the cache only, so in this case, we
-                    // should retrieve it again!
-                    if( exists( localPathLog(path) ) ){
-                        log_msg("\nexistsRemote -> third if log exist - %s\n", localPathLog(path) );
-                        struct stat statbuf;
-                        lstat( localPathLog(path), &statbuf);
-                        remove( localPathLog(path) );
-                        localFileExist( path );
-                        return true;
-                    }
+                // if the cachefile log file exists, means the file exists remotely, But
+                // was deleted locally in the cache only, so in this case, we
+                // should retrieve it again!
+                if( exists( localPathLog(path) ) ){
+                    log_msg("\nexistsRemote -> third if log exist - %s\n", localPathLog(path) );
+                    struct stat statbuf;
+                    lstat( localPathLog(path), &statbuf);
+                    remove( localPathLog(path) );
+                    localFileExist( path );
+                    return true;
                 }
                 log_msg( "\nexistsRemote -> third if - return False - no cacheFile_log - %s\n", localPathLog(path) );
                 return false;
@@ -783,7 +796,6 @@ class __cache {
                     }
                     // call itself again to do the local evaluation again after the caching!!
                     // log_msg("existsRemote -> fifth if  - recurse\n" );
-                    // bool ret =  existsRemote( path, checkLocal, depth+1 );
                     bool ret = existsLocal( path );
                     log_msg("existsRemote -> fifth if  - recurse returned %d \n", int(ret) );
                     if( ! ret ){

@@ -10,8 +10,8 @@
 
 
 # CCDEPMODE 	= depmode=gcc3
-CFLAGS 		= -g -O3
-# CFLAGS 		= -g
+# CFLAGS 		= -g -O3
+CFLAGS 		= -g
 AWK 		= gawk
 CC 			= g++
 CPP 		= g++ -E
