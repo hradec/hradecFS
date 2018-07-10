@@ -115,7 +115,7 @@ int getdir (string dir, vector<string> &files)
     struct dirent *dirp;
     if((dp  = opendir(dir.c_str())) == NULL) {
         // cout << "Error(" << errno << ") opening " << dir << endl;
-        log_msg( "\tgetdir %s ERROR: %d\n", dir.c_str(), errno);
+        log_msg( "!!!\tgetdir %s ERROR: %d - %s\n", dir.c_str(), errno,  strerror(errno) );
         return errno;
     }
 

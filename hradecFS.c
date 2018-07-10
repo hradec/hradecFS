@@ -256,7 +256,7 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
         string entry = string(path)+"/"+de->d_name;
         CACHE.init(entry);
 
-        log_msg("\033[1;31m calling filler with name %s - ino [%d]\n", de->d_name, de->d_ino);
+        log_msg("\033[1;31m calling filler with name %s - ino [%d]\n", entry.c_str(), de->d_ino);
         if( string(de->d_name)==".." || string(de->d_name)=="." || CACHE.existsRemote( entry ) ){
             memset(&st, 0, sizeof(st));
             st.st_ino = de->d_ino;

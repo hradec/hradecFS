@@ -11,7 +11,7 @@
 
 # CCDEPMODE 	= depmode=gcc3
 # CFLAGS 		= -g -O3
-CFLAGS 		= -g
+CFLAGS 		= -g $(shell pkg-config fuse --cflags --libs)
 AWK 		= gawk
 CC 			= g++
 CPP 		= g++ -E
@@ -34,7 +34,7 @@ SHELL 	  	= /bin/sh
 FUSE_LIBS 	= -lfuse3 -pthread
 OBJECTS	  	= $(shell ls *.c | sed 's/\.c/.o /g')
 DEPS	  	= $(shell ls -1 *.h)
-
+PWD			= $(shell pwd)
 
 COMPILE = $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
 
@@ -48,6 +48,28 @@ all: hradecFS
 hradecFS$(EXEEXT): $(OBJECTS)
 	rm -f hradecFS$(EXEEXT)
 	$(LINK) $(OBJECTS) $(FUSE_LIBS) $(LIBS) -o $@
+
+
+
+docker:
+	docker run -ti --rm \
+		--device /dev/fuse \
+		-v /etc/passwd:/etc/passwd \
+		-v /etc/groups:/etc/groups \
+		-v /ssd/atomo_cachedir:/atomo_cachedir \
+		-v $(PWD):/hradecFS \
+		-v $(HOME):$(HOME) \
+		--cap-add SYS_ADMIN \
+		--name hradecFS hradec/docker_lizardfs \
+		/bin/bash -c "\
+			yaourt -Sy sshfs --noconfirm ; cd /hradecFS ; mkdir /r610 ; chmod a+rw /r610 ; \
+			mkdir /root/.ssh ;  echo 'StrictHostKeyChecking no' > /root/.ssh/config ; \
+			sshfs -o allow_other -o IdentityFile=$(HOME)/.ssh/id_rsa $(USER)@192.168.0.12:/ZRAID/ /r610 ; \
+			/hradecFS/hradecFS  -o allow_other  /r610/atomo/ /atomo/; \
+			runuser - rhradec -c '/bin/bash --init-file /atomo/pipeline/tools/init/bash' \
+		"
+log:
+	while true ; do docker exec -ti hradecFS cat /tmp/.bbfs.log ; done
 
 test: all cleanTest upload
 	$(MKDIR_P) /tmp/xx
@@ -72,7 +94,8 @@ debug: all cleanTest upload
 
 
 upload:
-	cp -rfv ./hradecFS /ZRAID2/
+	#cp -rfv ./hradecFS /ZRAID2/
+	gsutil cp ./hradecFS gs://zraid2/
 
 cleanTest:
 	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount -f -l $$(mount | grep hradecFS | awk '{print $$3}') || true

@@ -30,6 +30,7 @@ using namespace std;
 
 
 
+
 static pthread_mutex_t mutex_readlink;
 static pthread_mutex_t mutex_cache_path;
 
@@ -40,6 +41,21 @@ static pthread_mutex_t __mutex_localFileExist;
 #define pthread_mutex_wait_unlock( __mutex__ )  \
     pthread_mutex_lock( __mutex__ ); \
     pthread_mutex_unlock( __mutex__ );
+
+
+
+
+#include <exception>
+class myexception: public exception
+{
+  virtual const char* what() const throw()
+  {
+    log_msg( "!!! Exception!" );
+    return "My exception happened";
+  }
+} except;
+
+
 
 
 static pthread_mutex_t mutex_mkdir_p;
@@ -164,7 +180,7 @@ class __cache {
 
         void cleanupBeforeStart(){
 
-            pthread_mutex_init( &__mutex_localFileExist   , NULL );
+            pthread_mutex_init( &__mutex_localFileExist , NULL );
             pthread_mutex_init( &mutex_cache_path       , NULL );
             pthread_mutex_init( &mutex_mkdir_p          , NULL );
             pthread_mutex_init( &mutex_readlink         , NULL );
@@ -635,7 +651,9 @@ class __cache {
             doCachePath(path);
 
             vector<string> files = vector<string>();
-            getdir( string( remotePath(path) ) + "/", files );
+            if( getdir( fixPath( remotePath(path) ) + "/", files ) )
+                log_msg( "!!!! exception remotepath getidr(%s)\n", (fixPath( remotePath(path) ) + "/").c_str() );
+                //throw except;
 
             for ( unsigned int i = 0; i < files.size(); i++ ) {
                 struct stat statbuf2;
