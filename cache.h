@@ -582,6 +582,7 @@ class __cache {
             // fix log file (file, folder and link and local)
             if( localFile ){
                 setLocallyCreated( path );
+                lstat( localPath(path), &statbuf );
             }else{
                 setLogFileType( path );
             }
@@ -596,7 +597,7 @@ class __cache {
             //         m_cache[path]["cacheFile_log"] = m_cache[path]["cacheFile_log"] + fileSuffix;
             // }
 
-            if( ! exists( localPathLog( path ) ) ){
+            if( ! exists( localPathLog( path ) ) || localFile ){
                 // create a log file for every file/folder/link
                 // we use the log file to known what's in the remote side and what's not!
                 string tmp = _format( "%s*%lld\n", localPath( path ) , (long long) statbuf.st_size );
