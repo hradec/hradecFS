@@ -166,6 +166,17 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
 
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_opendir %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
+
+    if( path == "/" ){
+        string pref = string(path)+".hradecFS_local_files";
+        CACHE.init( pref );
+        CACHE.setLocallyCreated( pref );
+        close( creat( CACHE.localPath( pref ),  S_IRWXU | S_IRWXG | S_IRWXO  ) );
+        CACHE.localFileExist( pref );
+        // st.st_ino = -1;
+        // filler( buf, ".hradecFS_local_files", &st, 0, 0 );
+    }
+
     CACHE.init( path );
     if ( ! CACHE.existsRemote( path ) ){
         return -1;
@@ -209,29 +220,27 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
     DIR *dp;
     struct dirent *de;
 
-    string spath = path;
-
-    CACHE.init( path );
-    CACHE.doCachePathDir( path );
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_readdir  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
     // log_msg("\nhradecFS_readdir(path=\"%s\", buf=0x%08x, filler=0x%08x, offset=%lld, fi=0x%08x)\n",path, buf, filler, offset, fi);
     // once again, no need for fullpath -- but note that I need to cast fi->fh
-    // dp = (DIR *) (uintptr_t) fi->fh;
+    dp = (DIR *) (uintptr_t) fi->fh;
 
-    if( spath == "/" ){
-        string pref = spath+".hradecFS_local_files";
-        CACHE.init( pref );
-        CACHE.setLocallyCreated( pref );
-        close( creat( CACHE.localPath( pref ),  S_IRWXU | S_IRWXG | S_IRWXO  ) );
-        CACHE.localFileExist( pref );
-        // st.st_ino = -1;
-        // filler( buf, ".hradecFS_local_files", &st, 0, 0 );
-    }
+    // CACHE.init( path );
+    // CACHE.doCachePathDir( path );
+    // if( path == "/" ){
+    //     string pref = path+".hradecFS_local_files";
+    //     CACHE.init( pref );
+    //     CACHE.setLocallyCreated( pref );
+    //     close( creat( CACHE.localPath( pref ),  S_IRWXU | S_IRWXG | S_IRWXO  ) );
+    //     CACHE.localFileExist( pref );
+    //     // st.st_ino = -1;
+    //     // filler( buf, ".hradecFS_local_files", &st, 0, 0 );
+    // }
 
 
 
-    dp = opendir( CACHE.localPath( path ) );
+    // dp = opendir( CACHE.localPath( path ) );
     if (dp == NULL)
         return -errno;
 
@@ -269,7 +278,7 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
             }
         }
     }
-    closedir( dp );
+    // closedir( dp );
     // log_fi(fi);
 
     log_msg("\n====>readdir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
@@ -608,7 +617,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
     char rsyncIt=0;
 
     CACHE.init( path );
-    log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_open  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
+    log_msg("\n>>>>>>>>>>>>> hradecFS_open  %s [%d] >>>>>>>>>\n", path, fuse_get_context()->uid);
     log_msg( "\nhradecFS_open(CACHE.localPath(\"%s\") - %s\n", CACHE.localPath(path), path );
 
     // check if a log file has "100%", which means the file is synced OK!!
@@ -675,7 +684,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
             // all other threads trying to access this sane file are waiting the
             // lock file to be removed!!
             if ( rsyncIt ) {
-                log_msg("\n\n!!! STARTED RSYNC\n\n");
+                log_msg("\nREMOTE \t!!! STARTED RSYNC\n\n");
                 // reset the log file!
                 CACHE.localFileExist( path, CACHE.no_uid );
                 // construct the rsync command call!
@@ -687,7 +696,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
                 // run the cmd now!
                 log_msg( cmd );
-                log_msg("\n\t!!! rsync system return: [%2d]", system( cmd ) );
+                log_msg( "\nREMOTE  \t!!! rsync system return: [%2d]", system( string(cmd).c_str() ) );
 
                 // we need to make sure the cache from rsync is flushed before
                 // we can open it here
@@ -702,7 +711,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 // system( cmd );
                 pthread_mutex_unlock(&mutex);
 
-                log_msg("\n\n!!! FINISHED RSYNC\n\n");
+                log_msg("\nREMOTE\t!!! FINISHED RSYNC\n\n");
             }
 
         }
@@ -1070,7 +1079,7 @@ struct hradecFS_oper_struc : fuse_operations  {
 
         opendir    = hradecFS_opendir;
         readdir    = hradecFS_readdir;
-        // releasedir = hradecFS_releasedir;
+        releasedir = hradecFS_releasedir;
         // fsyncdir   = hradecFS_fsyncdir;
         init       = hradecFS_init;
         destroy    = hradecFS_destroy;

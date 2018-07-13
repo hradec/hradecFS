@@ -78,7 +78,7 @@ bool _replace(std::string& str, const std::string& from, const std::string& to) 
 }
 
 
-string _dirname(string source)
+string _dirname(string source, const char* caller = __builtin_FUNCTION())
 {
     if (source.size() <= 1) //Make sure it's possible to check the last character.
     {
@@ -106,16 +106,16 @@ inline std::string& ltrim(std::string& s, const char* t )
     return s;
 }
 
-int getdir (string dir, vector<string> &files)
+int getdir (string dir, vector<string> &files, const char* caller = __builtin_FUNCTION())
 {
-    log_msg( "getdir( %s )\n", dir.c_str() );
+    log_msg( "caller(%s) -> getdir( %s )\n", caller, dir.c_str() );
 
     string cdir = rtrim(dir,"/");
     DIR *dp;
     struct dirent *dirp;
     if((dp  = opendir(dir.c_str())) == NULL) {
         // cout << "Error(" << errno << ") opening " << dir << endl;
-        log_msg( "!!!\tgetdir %s ERROR: %d - %s\n", dir.c_str(), errno,  strerror(errno) );
+        log_msg( "!!!\tcaller(%s) -> getdir %s ERROR: %d - %s\n", caller, dir.c_str(), errno,  strerror(errno) );
         return errno;
     }
 

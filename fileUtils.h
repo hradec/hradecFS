@@ -53,11 +53,11 @@ mode_t getUmask(void){
 }
 
 
-inline std::vector<std::string> glob(const std::string& pat){
+inline std::vector<std::string> glob(const std::string& pat, const char* caller = __builtin_FUNCTION()){
     using namespace std;
     glob_t glob_result;
     int retr = glob(pat.c_str(),GLOB_TILDE,NULL,&glob_result);
-    log_msg( "glob( %s ) = %d - return %d\n", pat.c_str(), (unsigned int)glob_result.gl_pathc, retr );
+    log_msg( "caller(%s) -> glob( %s ) = %d - return %d\n", caller,  pat.c_str(), (unsigned int)glob_result.gl_pathc, retr );
     vector<string> ret;
     for(unsigned int i=0;i<glob_result.gl_pathc;++i){
         ret.push_back(string(glob_result.gl_pathv[i]));
@@ -91,10 +91,10 @@ char islnk(const char *path)
 }
 
 
-char exists(const char *path)
+char exists(const char *path, const char* caller = __builtin_FUNCTION())
 {
   if( islnk( path ) ){
-      log_msg( "\nexists is link = true\n" );
+      log_msg( "\nexists is link = true - called from caller(%s)\n", caller );
       return 1;
   }
   struct stat s;
@@ -123,17 +123,17 @@ char chown(string path, uid_t owner, gid_t group){
 }
 
 
-char isdir(string path){
+char isdir(string path, const char* caller = __builtin_FUNCTION()){
     return isdir(path.c_str());
 }
-char isfile(string path){
+char isfile(string path, const char* caller = __builtin_FUNCTION()){
     return isfile(path.c_str());
 }
-char islnk(string path){
+char islnk(string path, const char* caller = __builtin_FUNCTION()){
     return islnk(path.c_str());
 }
 
-char isdir(const char *path)
+char isdir(const char *path, const char* caller = __builtin_FUNCTION())
 {
   if( islnk( path ) ){
     return 0;
@@ -157,7 +157,7 @@ char isfile(const char *path)
   }
   return 1;
 }
-char *replace_str(char *str, const char *orig, const char *rep)
+char *replace_str(char *str, const char *orig, const char *rep, const char* caller = __builtin_FUNCTION())
 {
    static char buffer[1024];
    char *p;
@@ -185,14 +185,14 @@ char *replace_str(char *str, const char *orig, const char *rep)
    return buffer;
 }
 
-long getFileSize(std::string filename)
+long getFileSize(std::string filename,const char* caller = __builtin_FUNCTION())
 {
     struct stat stat_buf;
     int rc = stat(filename.c_str(), &stat_buf);
     return rc == 0 ? stat_buf.st_size : -1;
 }
 
-bool checkFileSize(const char *path1, const char *path2)
+bool checkFileSize(const char *path1, const char *path2, const char* caller = __builtin_FUNCTION())
 {
     // get size
     struct stat fpath_st;
@@ -220,7 +220,7 @@ int replace(char *str, char orig, char rep) {
 }
 
 
-void __stat__(const char *fpath, struct stat *statbuf, char *cacheFile){
+void __stat__(const char *fpath, struct stat *statbuf, char *cacheFile, const char* caller = __builtin_FUNCTION()){
     char buf[1024];
     unsigned long len;
     // log_stat(statbuf);
@@ -228,7 +228,7 @@ void __stat__(const char *fpath, struct stat *statbuf, char *cacheFile){
 
         if ((len = readlink(fpath, buf, sizeof(buf)-1)) != -1){
             buf[len] = '\0';
-            log_msg("\nlink %s = %s\n", fpath, buf);
+            log_msg("\ncaller(%s) - link %s = %s\n", caller, fpath, buf);
             symlink(buf, cacheFile);
         }
     }else if(isfile(fpath)){
@@ -246,7 +246,7 @@ void __stat__(const char *fpath, struct stat *statbuf, char *cacheFile){
 }
 
 
-long checkForRsyncTemp(char *path){
+long checkForRsyncTemp(char *path, const char* caller = __builtin_FUNCTION()){
   // check if it's already caching
   glob_t        globlist;
   int           ret;
@@ -263,7 +263,7 @@ long checkForRsyncTemp(char *path){
 }
 
 
-void waitForLock(char *path){
+void waitForLock(char *path, const char* caller = __builtin_FUNCTION()){
   long cur_size=-1;
   long old_size=-2;
   char count=0;
@@ -299,7 +299,7 @@ static void hradecFS_fullpath(char fpath[PATH_MAX], const char *path)
     strncat(fpath, path, PATH_MAX); // ridiculously long paths will
                     // break here
 
-    log_msg("    hradecFS_fullpath:  rootdir = \"%s\", path = \"%s\", fpath = \"%s\"\n", BB_DATA->rootdir, path, fpath);
+    log_msg("    hradecFS_fullpath:  rootdir = \"%s\", path = \"%s\", fpath = \"%s\"\n",  BB_DATA->rootdir, path, fpath);
 }
 
 

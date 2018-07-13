@@ -49,6 +49,10 @@
 #include <glob.h>
 
 #include <utime.h>
+//
+#include <sys/types.h>
+#include <sys/syscall.h>
+
 
 
 // #include "cache_utils.h"
@@ -159,11 +163,16 @@ void log_msg(const char *format, ...)
 {
     va_list ap;
     char buff[8192];
+    char buff2[8192];
     va_start(ap, format);
     vsprintf(buff, format,  ap);
     va_end (ap);
 
+    if( ! fuse_get_context() )
+        return;
+
     if ( BB_DATA->log && BB_DATA->logfile != NULL ){
+
 
         string reset    ="\033[0m";
         string green    ="\033[0;32m";
@@ -193,7 +202,8 @@ void log_msg(const char *format, ...)
         }
         tmp = boost::replace_all_copy( tmp, "\n\n", "\n" );
 
-        tmp = boost::replace_all_copy( tmp, "\n", "\nhradecFS:" );
+        sprintf( buff2, "\nthread(%d) | ", syscall(__NR_gettid) );
+        tmp = boost::replace_all_copy( tmp, "\n", byellow + buff2 + "hradecFS:" );
         tmp = boost::replace_all_copy( tmp, "hradecFS: hradecFS:", green+"hradecFS:"+bgreen+"=======================================  "+reset );
         tmp = boost::replace_all_copy( tmp, "hradecFS:", green+"hradecFS:"+reset );
         tmp = boost::replace_all_copy( tmp, "REMOTE", bred+"REMOTE" );
@@ -206,8 +216,7 @@ void log_msg(const char *format, ...)
         tmp = boost::replace_all_copy( tmp, "\n", reset+"\n" );
 
 
-
-        fprintf(BB_DATA->logfile, tmp.c_str());
+        fprintf( BB_DATA->logfile, tmp.c_str() );
 
         // fprintf( stderr,  tmp.c_str());
         fflush(BB_DATA->logfile);

@@ -11,7 +11,7 @@
 
 # CCDEPMODE 	= depmode=gcc3
 # CFLAGS 		= -g -O3
-CFLAGS 		= -g $(shell pkg-config fuse --cflags --libs)
+CFLAGS 		= -g  $(shell pkg-config fuse3 --cflags --libs)
 AWK 		= gawk
 CC 			= g++
 CPP 		= g++ -E
@@ -21,7 +21,7 @@ DEPDIR 		= .deps
 ECHO_N 		= -n
 EGREP 		= /usr/sbin/grep -E
 FUSE_CFLAGS = -D_FILE_OFFSET_BITS=64 -I/usr/include/fuse -fpermissive
-FUSE_LIBS 	= -lfuse -pthread
+FUSE_LIBS 	= -pthread $(shell pkg-config fuse3 --libs)
 GREP      	= /usr/sbin/grep
 EXEEXT 		=
 LDFLAGS   	=
@@ -51,33 +51,85 @@ hradecFS$(EXEEXT): $(OBJECTS)
 
 
 
-docker:
+gfarm:
 	docker run -ti --rm \
 		--device /dev/fuse \
 		-v /etc/passwd:/etc/passwd \
 		-v /etc/groups:/etc/groups \
 		-v /ssd/atomo_cachedir:/atomo_cachedir \
+		-v /ssd/atomo_var_cache/:/var/cache/pacman/ \
 		-v $(PWD):/hradecFS \
-		-v $(HOME):$(HOME) \
+		-v $(HOME)/.ssh:/tmp/.ssh \
+		-v $(XAUTHORITY):/tmp/.Xauthority \
+		-v /tmp/.X11-unix:/tmp/.X11-unix \
+		-e XAUTHORITY=/root/.Xauthority \
+		-e DISPLAY=$(DISPLAY) \
 		--cap-add SYS_ADMIN \
-		--name hradecFS hradec/docker_lizardfs \
-		/bin/bash -c "\
-			yaourt -Sy sshfs --noconfirm ; cd /hradecFS ; mkdir /r610 ; chmod a+rw /r610 ; \
-			mkdir /root/.ssh ;  echo 'StrictHostKeyChecking no' > /root/.ssh/config ; \
-			sshfs -o allow_other -o IdentityFile=$(HOME)/.ssh/id_rsa $(USER)@192.168.0.12:/ZRAID/ /r610 ; \
+		--cap-add=SYS_PTRACE \
+		--name hradecFS_gfarm hradec/docker_lizardfs \
+		/bin/bash -c '\
+			runuser rhradec -c "cd /hradecFS ; make clean ; make all" || exit -1 ; \
+		'
+
+
+
+.docker_build.done: Dockerfile
+	docker pull base/archlinux:latest
+	docker build . -f Dockerfile -t hradec/hradecfs_dev
+	touch .docker_build.done
+
+docker: .docker_build.done
+	docker run -ti --rm \
+		--device /dev/fuse \
+		-v /etc/passwd:/etc/passwd \
+		-v /etc/groups:/etc/groups \
+		-v /ssd/atomo_cachedir:/atomo_cachedir \
+		-v /ssd/atomo_var_cache/:/var/cache/pacman/ \
+		-v $(PWD):/hradecFS \
+		-v $(HOME)/.ssh:/tmp/.ssh \
+		-v $(XAUTHORITY):/tmp/.Xauthority \
+		-v /tmp/.X11-unix:/tmp/.X11-unix \
+		-e XAUTHORITY=/root/.Xauthority \
+		-e DISPLAY=$(DISPLAY) \
+		--cap-add SYS_ADMIN \
+		--cap-add=SYS_PTRACE \
+		--name hradecFS hradec/hradecfs_dev \
+		/bin/bash -c '\
+			runuser rhradec -c "cd /hradecFS ; make all" || exit -1 ; \
+			mkdir /r610 ; chmod a+rw /r610 ; \
+			cp -rf /tmp/.ssh /root/ ; \
+			cp -rf /tmp/.Xauthority /root/ ; \
+			echo "run nemiver once just to get an error. after this first run, it will run correctly" ; nemiver ; \
+			sshfs 	-o allow_other -o IdentityFile=/root/.ssh/id_rsa \
+					-o reconnect,no_readahead,cache_timeout=115200 \
+					-o attr_timeout=115200,entry_timeout=1200,kernel_cache \
+					-o noforget,dcache_max_size=10000000,dcache_timeout=200 \
+					-o dcache_clean_interval=1000000,dcache_min_clean_interval=100000000 \
+					$(USER)@192.168.0.12:/ZRAID/ /r610 \
+			|| exit -1 ; \
+			mount | grep r610 ; \
 			/hradecFS/hradecFS  -o allow_other  /r610/atomo/ /atomo/; \
-			runuser - rhradec -c '/bin/bash --init-file /atomo/pipeline/tools/init/bash' \
-		"
+			QT_X11_NO_MITSHM=1 DISPLAY=:0 GDK_SYNCHRONIZE=1 LC_ALL=C TERM=xterm\
+			nemiver --attach=$$(pidof hradecFS) & \
+			runuser - rhradec -c "/bin/bash --init-file /atomo/pipeline/tools/init/bash"  \
+		'
+
+		# mkdir /root/.ssh ;  echo "StrictHostKeyChecking no" > /root/.ssh/config ; \
+		# yaourt -Sy sshfs --noconfirm ; \
+		# yaourt -S xterm --noconfirm ; \
+		# yaourt -S gdb nemiver --noconfirm --force ; \
+# xterm -fg white -bg black -e "gdb /hradecFS/hradecFS -p  $$(pidof hradecFS) -tui" & \
+
 log:
 	while true ; do docker exec -ti hradecFS cat /tmp/.bbfs.log ; done
 
-test: all cleanTest upload
+test: all cleanTest
 	$(MKDIR_P) /tmp/xx
 	sudo su - -c "$(shell pwd)/hradecFS -o allow_other $(TEST_FS)/ /tmp/xx"
 	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
 
 
-debug: all cleanTest upload
+debug: all cleanTest
 	$(MKDIR_P) /tmp/xx
 	sudo su - -c "$(shell pwd)/hradecFS -d -o allow_other $(TEST_FS)/ /tmp/xx > /tmp/debug.log &"
 	@echo "Folder $(TEST_FS) mounted on /tmp/xx!!"
@@ -93,7 +145,7 @@ debug: all cleanTest upload
 	# $(AM_V_CC_no)$(COMPILE) -c -o $@ $<
 
 
-upload:
+upload: gfarm
 	#cp -rfv ./hradecFS /ZRAID2/
 	gsutil cp ./hradecFS gs://zraid2/
 
@@ -111,6 +163,7 @@ clean: cleanTest
 	rm -fv *.d
 	rm -f hradecFS$(EXEEXT)
 	rm -fv a.out
+	rm .docker_build.done
 
 nuke: clean cleanTestAll
 cleanAll: nuke
