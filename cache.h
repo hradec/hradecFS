@@ -32,13 +32,15 @@
 // a lstat wrapper to display the caller function in the log!
 int _lstat( const char *path, struct stat *buf, const char* caller = __builtin_FUNCTION() )
 {
-    log_msg("\n==> \t caller(%s) - lstat(%s)\n", caller, path);
-    return lstat( path, buf );
+    int ret = lstat( path, buf );
+    log_msg("\n==> \t caller(%s) - lstat(%s) = %d\n", caller, path, ret);
+    return ret;
 }
 int __stat( const char *path, struct stat *buf, const char* caller = __builtin_FUNCTION() )
 {
-    log_msg("\n==> \t caller(%s) - stat(%s)\n", caller, path);
-    return stat( path, buf );
+    int ret = stat( path, buf );
+    log_msg("\n==> \t caller(%s) - stat(%s) = %d\n", caller, path, ret);
+    return ret;
 }
 #define lstat  _lstat
 // #define stat  __stat
@@ -609,8 +611,6 @@ class __cache {
                 close( file );
                 pthread_mutex_unlock(&__mutex_localFileExist);
 
-                localFileNotExistRemove( path );
-
                 // set remote file stats to log file as well
                 // but time should be current!!
                 statbuf.st_mtime = time(NULL);
@@ -618,6 +618,7 @@ class __cache {
                 setStats( localPathLog( path ), &statbuf);
                 log_msg( "\n !!! localFileExist: create skeleton %s --> %s \n",  localPathLog( path ), localPath( path ) );
             }
+            localFileNotExistRemove( path );
         }
 
         void doCachePath(string path, int __depth=0){
@@ -674,8 +675,8 @@ class __cache {
 
             // if already cached, don't cache again!
             path = fixPath(path);
-            if ( isDirCached( path ) ){
-                log_msg( "======> doCachePathDir: isDirCached True - %s\n", path.c_str() );
+            if ( isDirCached( path ) || isLocallyCreated( path ) ){
+                log_msg( "======> doCachePathDir: isDirCached True - %s / locallyCreated = \n", path.c_str(), isLocallyCreated( path ) );
                 return ;
             }
             log_msg( "\nREMOTE ====> doCachePathDir: %s -> %s\n", path.c_str(), remotePath(path) );
@@ -885,7 +886,7 @@ class __cache {
 
             return true;
         }
-        bool existsLocal(string path){
+        bool existsLocal( string path, const char* caller = __builtin_FUNCTION() ){
 
             // if the file or the folder the files is in doenst exist in the remote filesystem, return NotExist
             // this is a HUGE speedup for searchpaths, like PYTHONPATH!!!
@@ -898,20 +899,20 @@ class __cache {
 
 
             if ( exists( m_cache[path]["cacheDirNotExist"].c_str() ) || exists( m_cache[path]["cacheFileNotExist"].c_str() ) ){
-                log_msg("existsLocal -> first if - return False - '%s' '%s'  '%s'\n",path.c_str(), m_cache[path]["cacheDirNotExist"].c_str(), m_cache[path]["cacheFileNotExist"].c_str() );
+                log_msg("%s | existsLocal -> first if - return False - '%s' '%s'  '%s'\n",caller, path.c_str(), m_cache[path]["cacheDirNotExist"].c_str(), m_cache[path]["cacheFileNotExist"].c_str() );
                 return false;
             }
 
             // if the the folder of the path doesn't exist locally, return Not Exists already..
             // don't even check for file!
             if ( path!="/" && ! exists( localPathDir(path) ) ){
-                log_msg( "existsLocal ->  ! exists( localPathDir(%s) ) = %d - return False", path.c_str(), int(! exists( localPathDir(path) )) );
+                log_msg( "%s | existsLocal ->  ! exists( localPathDir(%s) ) = %d - return False", caller, path.c_str(), int(! exists( localPathDir(path) )) );
                 return false;
             }
 
             // if the files exists in the cache filesystem, return EXISTS!
             if ( exists( localPath(path) ) ){
-                log_msg( "existsLocal ->  return exists( localPath(%s) ) = %d", path.c_str(), int(exists( localPath(path) )) );
+                log_msg( "%s | existsLocal ->  return exists( localPath(%s) ) = %d", caller, path.c_str(), int(exists( localPath(path) )) );
                 return bool( exists( localPathLog(path) ) );
             }
 

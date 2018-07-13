@@ -755,7 +755,7 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
                     sprintf( buf, string( p + "\n" + buf ).c_str() );
             }
         }
-        ret = log_syscall("====>pread", strlen(buf), 0);
+        ret = log_syscall("====>pread .hradecFS_local_files", strlen(buf), 0);
     }else{
         ret = pread(fi->fh, buf, size, offset);
         log_msg("\n====>pread     uid: [%4d] size: [%10lld] offset: [%10lld] read: [%10lld]   size=read: %d  path: %s \n", fuse_get_context()->uid, size, offset, ret, size==ret,   path);
