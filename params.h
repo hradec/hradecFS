@@ -26,8 +26,9 @@ struct hradecFS_state {
     char *mountdir;
     char *cachedir;
     char *syncCommand;
-    bool log;
+    int log;
 };
-#define BB_DATA ((struct hradecFS_state *) fuse_get_context()->private_data)
+#define FUSE_CTX fuse_get_context()
+#define BB_DATA ((struct hradecFS_state *)FUSE_CTX->private_data)
 
 #endif

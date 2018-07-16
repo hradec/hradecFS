@@ -21,7 +21,7 @@ DEPDIR 		= .deps
 ECHO_N 		= -n
 EGREP 		= /usr/sbin/grep -E
 FUSE_CFLAGS = -D_FILE_OFFSET_BITS=64 -I/usr/include/fuse -fpermissive
-FUSE_LIBS 	= -pthread $(shell pkg-config fuse3 --libs)
+FUSE_LIBS 	= -pthread -lboost_filesystem -lboost_system $(shell pkg-config fuse3 --libs)
 GREP      	= /usr/sbin/grep
 EXEEXT 		=
 LDFLAGS   	=
@@ -31,7 +31,6 @@ LTLIBOBJS 	=
 MKDIR_P   	= /usr/sbin/mkdir -p
 OBJEXT 	  	= o
 SHELL 	  	= /bin/sh
-FUSE_LIBS 	= -lfuse3 -pthread
 OBJECTS	  	= $(shell ls *.c | sed 's/\.c/.o /g')
 DEPS	  	= $(shell ls -1 *.h)
 PWD			= $(shell pwd)
@@ -148,6 +147,9 @@ debug: all cleanTest
 upload: gfarm
 	#cp -rfv ./hradecFS /ZRAID2/
 	gsutil cp ./hradecFS gs://zraid2/
+	gsutil cp ./*.c gs://zraid2/
+	gsutil cp ./*.h gs://zraid2/
+	gsutil cp ./Makefile gs://zraid2/
 
 cleanTest:
 	[ "$$(mount | grep hradecFS)" != "" ] && sudo umount -f -l $$(mount | grep hradecFS | awk '{print $$3}') || true

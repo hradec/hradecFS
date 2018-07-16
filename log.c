@@ -159,7 +159,7 @@ FILE *log_open_pipe(int flag)
     return logfile;
 }
 
-void log_msg(const char *format, ...)
+bool __log_msg(const char *format, ...)
 {
     va_list ap;
     char buff[8192];
@@ -169,7 +169,7 @@ void log_msg(const char *format, ...)
     va_end (ap);
 
     if( ! fuse_get_context() )
-        return;
+        return false;
 
     if ( BB_DATA->log && BB_DATA->logfile != NULL ){
 
@@ -202,7 +202,7 @@ void log_msg(const char *format, ...)
         }
         tmp = boost::replace_all_copy( tmp, "\n\n", "\n" );
 
-        sprintf( buff2, "\nthread(%d) | ", syscall(__NR_gettid) );
+        sprintf( buff2, "\nthread(%d) %d | ", syscall(__NR_gettid), BB_DATA->log );
         tmp = boost::replace_all_copy( tmp, "\n", byellow + buff2 + "hradecFS:" );
         tmp = boost::replace_all_copy( tmp, "hradecFS: hradecFS:", green+"hradecFS:"+bgreen+"=======================================  "+reset );
         tmp = boost::replace_all_copy( tmp, "hradecFS:", green+"hradecFS:"+reset );
@@ -221,7 +221,10 @@ void log_msg(const char *format, ...)
         // fprintf( stderr,  tmp.c_str());
         fflush(BB_DATA->logfile);
     }
+    return true;
 }
+
+
 
 // Report errors to logfile and give -errno to caller
 int log_error(const char *func)
@@ -257,7 +260,7 @@ void log_fuse_context(struct fuse_context *context)
     /** Private filesystem data */
     //	void *private_data;
     log_struct(context, private_data, %08x, );
-    log_struct(((struct hradecFS_state *)context->private_data), logfile, %08x, );
+    // log_struct(((struct hradecFS_state *)context->private_data), logfile, %08x, );
     log_struct(((struct hradecFS_state *)context->private_data), rootdir, %s, );
 
     /** Umask of the calling process (introduced in version 2.8) */
