@@ -92,7 +92,6 @@ int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *fil
 
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_getattr %s [%d]\n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
-    pthread_mutex_lock(CACHE.mutex(path));
 
     // if path exists remotely ( also returns true if the file exists locally only! )
     if ( CACHE.existsRemote( path ) ){
@@ -125,7 +124,6 @@ int hradecFS_getattr(const char *path, struct stat *statbuf, fuse_file_info *fil
         retstat =  -2;
     }
 
-    pthread_mutex_unlock(CACHE.mutex(path));
 
     log_msg("\n====>getattr   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
@@ -143,14 +141,15 @@ int hradecFS_fgetattr(const char *path, struct stat *statbuf, struct fuse_file_i
     // opening it, and then using the FD for an fgetattr.  So in the
     // special case of a path of "/", I need to do a getattr on the
     // underlying root directory instead of doing the fgetattr().
-    if (!strcmp(path, "/"))
-       return hradecFS_getattr(path, statbuf, fi);
+    if (!strcmp(path, "/")){
 
-    retstat = fstat(fi->fh, statbuf);
-    if (retstat < 0)
-        retstat = log_error("hradecFS_fgetattr fstat");
+       retstat =  hradecFS_getattr(path, statbuf, fi);
+   }else{
 
-    log_stat(statbuf);
+        retstat = fstat(fi->fh, statbuf);
+        if (retstat < 0)
+            retstat = log_error("hradecFS_fgetattr fstat");
+    }
 
     log_msg("\n====>fgetattr   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
@@ -178,31 +177,27 @@ int hradecFS_opendir(const char *path, struct fuse_file_info *fi)
 
     CACHE.init( path );
     if ( ! CACHE.existsRemote( path ) ){
-        return -1;
+        retstat = -1;
+    }else{
+        if( ! CACHE.isDirCached(path) ){
+            CACHE.doCachePathParentDir( path );
+            CACHE.doCachePathDir( path );
+            // log_msg("CACHE.doCachePathDir(%s)   hradecFS_opendir(path=\"%s\", fi=0x%08x)\n",path, CACHE.remotePath(path), fi);
+        }
+
+
+        if( CACHE.existsLocal( path ) ){
+            log_msg("\nopendir( CACHE.localPath(%s)=%s )\n",path, CACHE.localPath(path));
+            dp = opendir( CACHE.localPath(path) );
+        }
     }
 
-    if( ! CACHE.isDirCached(path) ){
-        // since opendir returns a pointer, takes some custom handling of
-        // return status.
-        //dp = opendir(CACHE.remotePath(path));
-        CACHE.doCachePathParentDir( path );
-        CACHE.doCachePathDir( path );
-        // log_msg("CACHE.doCachePathDir(%s)   hradecFS_opendir(path=\"%s\", fi=0x%08x)\n",path, CACHE.remotePath(path), fi);
-    }
-
-
-    if( CACHE.existsLocal( path ) ){
-        log_msg("\nopendir( CACHE.localPath(%s)=%s )\n",path, CACHE.localPath(path));
-        dp = opendir(CACHE.localPath(path));
-    }
-
-    // log_msg("    opendir returned 0x%p\n", dp);
     if (dp == NULL)
        retstat = log_error("hradecFS_opendir opendir");
 
     fi->fh = (intptr_t) dp;
 
-    log_msg("\n====>opendir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
+    log_msg("\n====>opendir   uid: [%4d]  return: [%2d] path: %s  dp: [0x%p]\n", fuse_get_context()->uid, retstat, path, dp);
     return retstat;
 }
 
@@ -240,49 +235,53 @@ int hradecFS_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t 
 
 
     // dp = opendir( CACHE.localPath( path ) );
-    if (dp == NULL)
-        return -errno;
+    if (dp == NULL){
+        retstat = -errno;
+    }else{
+        // Every directory contains at least two entries: . and ..  If my
+        // first call to the system readdir() returns NULL I've got an
+        // error; near as I can tell, that's the only condition under
+        // which I can get an error from readdir()
+        // de = readdir(dp);
+        // // log_msg("    readdir returned 0x%p\n", de);
+        // if (de == 0) {
+        //     retstat = log_error("hradecFS_readdir readdir");
+        //     return retstat;
+        // }
 
-    // Every directory contains at least two entries: . and ..  If my
-    // first call to the system readdir() returns NULL I've got an
-    // error; near as I can tell, that's the only condition under
-    // which I can get an error from readdir()
-    // de = readdir(dp);
-    // // log_msg("    readdir returned 0x%p\n", de);
-    // if (de == 0) {
-    //     retstat = log_error("hradecFS_readdir readdir");
-    //     return retstat;
-    // }
+        // This will copy the entire directory into the buffer.  The loop exits
+        // when either the system readdir() returns NULL, or filler()
+        // returns something non-zero.  The first case just means I've
+        // read the whole directory; the second means the buffer is full.
+        // do {
+        struct stat st;
+        while ((de = readdir(dp)) != NULL) {
+            string entry = string(path)+"/"+de->d_name;
+            // ignore .fuse_hidden files
+            if( entry.find(".fuse_hidden") != std::string::npos ){
+                continue;
+            }else
+            if( entry.find(".nfs00") != std::string::npos ){
+                continue;
+            }
+            CACHE.init(entry);
 
-    // This will copy the entire directory into the buffer.  The loop exits
-    // when either the system readdir() returns NULL, or filler()
-    // returns something non-zero.  The first case just means I've
-    // read the whole directory; the second means the buffer is full.
-    // do {
-    struct stat st;
-    while ((de = readdir(dp)) != NULL) {
-        string entry = string(path)+"/"+de->d_name;
-        // ignore .fuse_hidden files
-        if( entry.find(".fuse_hidden") != std::string::npos ){
-            continue;
-        }
-        CACHE.init(entry);
-
-        log_msg3("\033[1;31m calling filler with name %s - ino [%d]\n", entry.c_str(), de->d_ino);
-        if( string(de->d_name)==".." || string(de->d_name)=="." || CACHE.existsRemote( entry ) ){
-            memset(&st, 0, sizeof(st));
-            st.st_ino = de->d_ino;
-            st.st_mode = de->d_type << 12;
-            // lstat( CACHE.localPath(entry), &st );
-            if ( filler( buf, de->d_name, &st, 0, 0 ) ) {
-                log_msg( "\033[1;31m      >>>>> ERROR hradecFS_readdir filler:  buffer full" );
-                retstat = -ENOMEM;
-                break;
+            log_msg3("\033[1;31m calling filler with name %s - ino [%d]\n", entry.c_str(), de->d_ino);
+            if( string(de->d_name)==".." || string(de->d_name)=="." || CACHE.existsRemote( entry ) ){
+                memset(&st, 0, sizeof(st));
+                st.st_ino = de->d_ino;
+                st.st_mode = de->d_type << 12;
+                // lstat( CACHE.localPath(entry), &st );
+                if ( filler( buf, de->d_name, &st, 0, 0 ) ) {
+                    log_msg( "\033[1;31m      >>>>> ERROR hradecFS_readdir filler:  buffer full" );
+                    retstat = -ENOMEM;
+                    break;
+                }
             }
         }
+        // closedir( dp );
+        // log_fi(fi);
     }
-    // closedir( dp );
-    // log_fi(fi);
 
     log_msg("\n====>readdir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
@@ -298,7 +297,7 @@ int hradecFS_releasedir(const char *path, struct fuse_file_info *fi)
     // log_fi(fi);
     closedir((DIR *) (uintptr_t) fi->fh);
 
-    log_msg("\n====>releasedir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
+    log_msg("\n====>releasdir uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
     return retstat;
 }
 
@@ -309,19 +308,16 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
     char fpath[PATH_MAX];
 
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_readlink  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
-    pthread_mutex_lock(CACHE.mutex(path));
     CACHE.init( path );
+    CACHE.mutex_lock(path);
 
-    retstat = -1;
+
     // no path in the remote
-
     if ( ! CACHE.existsRemote( path ) ){
-        return retstat;
         // CACHE.doCachePathParentDir( path );
         // CACHE.doCachePath( path );
-    }
-
-    if( CACHE.existsLocal( path ) ){
+        retstat = -1;
+    }else if( CACHE.existsLocal( path ) ){
         retstat = readlink(CACHE.localPath(path), link, size - 1);
         log_msg("CACHE  hradecFS_readlink_cached(path=\"%s\", link=\"%s\", size=%d)\n", CACHE.localPath(path), link, size);
     // }else{
@@ -337,7 +333,7 @@ int hradecFS_readlink(const char *path, char *link, size_t size)
     }
 
     log_msg("\n====>readlink  uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
     return retstat;
 }
 
@@ -348,6 +344,8 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\nhradecFS_mknod  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
+
+    CACHE.mutex_lock( path );
 
     // On Linux this could just be 'mknod(path, mode, dev)' but this
     // tries to be be more portable by honoring the quote in the Linux
@@ -390,6 +388,7 @@ int hradecFS_mknod(const char *path, mode_t mode, dev_t dev)
 
     }
     // pthread_mutex_unlock(&mutex);
+    CACHE.mutex_unlock( path );
     log_msg4("\n====>mknod     uid: [%4d]  mode: [0%3o] dev: [%lld]  return: [%2d] path: %s \n", fuse_get_context()->uid, mode, dev, retstat, path);
 
     return retstat;
@@ -401,6 +400,7 @@ int hradecFS_mkdir(const char *path, mode_t mode)
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_mkdir  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
     CACHE.init( path );
+    CACHE.mutex_lock( path );
     log_msg("\nhradecFS_mkdir(path=\"%s\", mode=0%3o)\n", path, mode);
 
     int ret = -1;
@@ -411,9 +411,12 @@ int hradecFS_mkdir(const char *path, mode_t mode)
             ret = mkdir( CACHE.localPath( path ), mode );
         // now we remove the "notExist" file, if it exists, so
         // the folder shows up!
-        if( ret == 0 )
+        if( ret == 0 ){
+            CACHE.setLocallyCreated( path );
             CACHE.localFileExist( path );
+        }
     }
+    CACHE.mutex_unlock( path );
     log_msg("\n====>mkdir   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, ret, path);
     return ret;
 }
@@ -423,12 +426,12 @@ int hradecFS_unlink(const char *path)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_unlink  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
-
+    CACHE.mutex_lock( path );
     // int ret =  log_syscall("unlink", unlink( CACHE.localPath( path ) ), 0);
     // if( ret == 0)
 
     CACHE.removeFile( path );
-
+    CACHE.mutex_unlock( path );
     log_msg("\n====>unlink    uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, 0, path);
     return 0;
 }
@@ -438,12 +441,13 @@ int hradecFS_rmdir(const char *path)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_rmdir  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
-
+    CACHE.mutex_lock( path );
     // int ret =  log_syscall("rmdir", rmdir( CACHE.localPath( path ) ), 0);
     // if( ret == 0)
 
     CACHE.removeDir( path );
 
+    CACHE.mutex_unlock( path );
     log_msg("\n====>rmdir   uid: [%4d] path: %s \n", fuse_get_context()->uid, path);
     return 0;
 }
@@ -453,9 +457,17 @@ int hradecFS_symlink(const char *path, const char *link)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_symlink  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( link );
+    CACHE.mutex_lock( link );
 
     int ret =  symlink(path,  CACHE.localPath( link ) );
+    if( ret == 0 ){
+        CACHE.setLocallyCreated( link );
+        CACHE.localFileNotExistRemove( link );
+        CACHE.localFileExist( link );
+    }
+
     log_msg("\n====>symlink   uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, ret, path);
+    CACHE.mutex_unlock( link );
     return ret;
 }
 
@@ -465,8 +477,8 @@ int hradecFS_rename(const char *path, const char *newpath,  unsigned int i)
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_rename  %s->%s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, newpath, fuse_get_context()->uid);
     CACHE.init( path );
     CACHE.init( newpath );
-    pthread_mutex_lock(CACHE.mutex(path));
-    pthread_mutex_lock(CACHE.mutex(newpath));
+    CACHE.mutex_lock(path);
+    CACHE.mutex_unlock(newpath);
 
 
     int ret =  rename( CACHE.localPath( path ), CACHE.localPath( newpath ) );
@@ -478,8 +490,8 @@ int hradecFS_rename(const char *path, const char *newpath,  unsigned int i)
         CACHE.removeFile( path );
     }
 
-    pthread_mutex_unlock(CACHE.mutex(newpath));
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(newpath);
+    CACHE.mutex_unlock(path);
     log_msg("\n====>rename   uid: [%4d]  return: [%2d] path: %s  newpath: %s \n", fuse_get_context()->uid, ret, path, newpath);
     return ret;
 }
@@ -490,8 +502,16 @@ int hradecFS_link(const char *path, const char *newpath)
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_link  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
     CACHE.init( newpath );
+    CACHE.mutex_lock( newpath );
 
     int ret =  link( CACHE.localPath( path ), CACHE.localPath( newpath ) );
+    if( ret == 0 ){
+        CACHE.setLocallyCreated( path );
+        CACHE.localFileExist( path );
+        CACHE.localFileNotExistRemove( path );
+    }
+
+    CACHE.mutex_unlock( newpath );
     log_msg("\n====>link   uid: [%4d]  return: [%2d] path: %s  newpath: %s \n", fuse_get_context()->uid, ret, path, newpath);
     return ret;
 }
@@ -538,7 +558,7 @@ int hradecFS_truncate(const char *path, off_t newsize,  fuse_file_info *fi)
 {
      log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_truncate  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
      CACHE.init( path );
-     pthread_mutex_lock(CACHE.mutex(path));
+     CACHE.mutex_lock(path);
 
 
      int ret =  truncate( CACHE.localPath( path ), newsize);
@@ -546,7 +566,7 @@ int hradecFS_truncate(const char *path, off_t newsize,  fuse_file_info *fi)
          CACHE.init( path );
          CACHE.localFileExist( path, CACHE.no_uid );
      }
-     pthread_mutex_unlock(CACHE.mutex(path));
+     CACHE.mutex_unlock(path);
      log_msg("\n====>chown   return: [%2d] path: %s \n",  ret, path);
      return ret;
 }
@@ -555,7 +575,7 @@ int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
     int retstat = 0;
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_ftruncate  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     // log_msg("\nhradecFS_ftruncate(path=\"%s\", offset=%lld, fi=0x%08x)\n", path, size, fi);
     // log_fi(fi);
@@ -576,7 +596,7 @@ int hradecFS_ftruncate(const char *path, off_t size, struct fuse_file_info *fi)
     }else{
         res=-errno;
     }
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     log_msg("\n====>ftruncate   size: [%lld] uid: [%4d] return: [%2d] path: %s \n", size, fuse_get_context()->uid, res, path);
 
@@ -589,12 +609,12 @@ int hradecFS_utime(const char *path, struct utimbuf *ubuf)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_utime  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     log_msg("\nhradecFS_utime(path=\"%s\", ubuf=0x%08x)\n", CACHE.localPath( path ), ubuf);
 
     int ret =  utime( CACHE.localPath( path ), ubuf );
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
     return ret;
 }
 
@@ -605,13 +625,13 @@ static int hradecFS_utimens(const char *path, const struct timespec ts[2], struc
     int res;
 
     // don't use utime/utimes since they follow symlinks
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
     res = utimensat(0, CACHE.localPath( path ), ts, AT_SYMLINK_NOFOLLOW);
     if (res == -1)
         res = -errno;
 
     log_msg("\n====>utime     uid: [%4d]  return: [%2d] path: %s \n",fuse_get_context()->uid, res, path);
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
     return res;
 }
 #endif
@@ -643,7 +663,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
     CACHE.doCachePathParentDir(path);
     CACHE.init( path );
 
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     log_msg("\n>>>>>>>>>>>>> hradecFS_open  %s [%d] >>>>>>>>>\n", path, fuse_get_context()->uid);
     log_msg( "\nhradecFS_open(CACHE.localPath(\"%s\") - %s\n", CACHE.localPath(path), path );
@@ -691,7 +711,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
                         // if localpath doesn't exist, create it!
                         if( ! isdir( CACHE.localPathDir(path) ) ){
-                            mkdir( CACHE.localPathDir(path), S_IRWXU | S_IRWXG | S_IRWXO );
+                            mkdir_p( CACHE.localPathDir(path), S_IRWXU | S_IRWXG | S_IRWXO );
                         }
                     }
                     // unlock threads and break out from the loop!
@@ -753,14 +773,23 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 }else if( isfile( CACHE.remotePath(path) ) ){
                     if ( exists (CACHE.localPath(path) ) )
                         boost::filesystem::remove_all( CACHE.localPath( path ) );
-                    try
-                    {
-                        log_msg4( "\nREMOTE  \t!!! copy_file(%s) \n", CACHE.localPath(path));
-                        boost::filesystem::copy_file( string( CACHE.remotePath(path) ), string( CACHE.localPath(path) ) );
-                        log_msg4( "\nREMOTE  \t!!! copy_file(%s) system return: Susscessfully!\n", CACHE.localPath(path));
-                    }catch ( boost::filesystem::filesystem_error &e )
-                    {
-                        log_msg4( "\nREMOTE  \t!!! copy_file(%s) system return: Error: [%s]\n", CACHE.localPath(path), e.what());
+
+                    //  if file is bigger than 50Mb, use rsync
+                    if( CACHE.getPathSizeFromLog( path ) > 1024*1024*50 ){
+                        log_msg( "\nREMOTE\t %s\n", tmp_cmd );
+                        unsigned int rsync_ret = system( tmp_cmd );
+                        log_msg( "\nREMOTE  \t!!! rsync system return: [%2d]\n", rsync_ret );
+                    // else, just copy from original filesystem
+                    }else{
+                        try
+                        {
+                            log_msg4( "\nREMOTE  \t!!! copy_file(%s) \n", CACHE.localPath(path));
+                            boost::filesystem::copy_file( string( CACHE.remotePath(path) ), string( CACHE.localPath(path) ) );
+                            log_msg4( "\nREMOTE  \t!!! copy_file(%s) system return: Susscessfully!\n", CACHE.localPath(path));
+                        }catch ( boost::filesystem::filesystem_error &e )
+                        {
+                            log_msg4( "\nREMOTE  \t!!! copy_file(%s) system return: Error: [%s]\n", CACHE.localPath(path), e.what());
+                        }
                     }
                 }
 
@@ -778,7 +807,18 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
                 free(tmp_cmd);
                 pthread_mutex_unlock(&mutex);
 
-                log_msg("\nREMOTE\t!!! FINISHED RSYNC\n\n");
+                // deal with remote file disapearing!
+                // not having this was causing a deadlock!
+                if ( ! exists( CACHE.remotePath(path) ) ){
+                    log_msg("\nREMOTE\t!!! FINISHED RSYNC - something is wrong since the remote file disapeared!\n\n");
+                    remove( CACHE.localPath(path) );
+                    remove( CACHE.localPathLog(path) );
+                    CACHE.localFileNotExist( path );
+                }else{
+                    log_msg("\nREMOTE\t!!! FINISHED RSYNC\n\n");
+                }
+
+
             }
 
         }
@@ -791,7 +831,7 @@ int hradecFS_open(const char *path, struct fuse_file_info *fi)
 
     fi->fh = fd;
 
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     // log_fi(fi);
     log_msg("\n====>open      uid: [%4d]  return: [%2d] path: %s \n", fuse_get_context()->uid, retstat, path);
@@ -811,7 +851,7 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_read  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
     int ret=0;
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     if( string( path ) == "/.hradecFS_local_files" ){
         string p;
@@ -830,7 +870,7 @@ int hradecFS_read(const char *path, char *buf, size_t size, off_t offset, struct
         ret = pread(fi->fh, buf, size, offset);
         log_msg("\n====>pread     uid: [%4d] size: [%10lld] offset: [%10lld] read: [%10lld]   size=read: %d  path: %s \n", fuse_get_context()->uid, size, offset, ret, size==ret,   path);
     }
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     return ret;
 }
@@ -847,7 +887,7 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
     // log_fi(fi);
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_write  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
 
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
     CACHE.setLocallyCreated( path );
 
     int ret = pwrite(fi->fh, buf, size, offset);
@@ -856,7 +896,7 @@ int hradecFS_write(const char *path, const char *buf, size_t size, off_t offset,
     // we need to update the log file here to reflect the new size of the file right
     // after writing, since NFS call getattr right after writing, before closing the file.
     CACHE.localFileExist( path );
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
     return ret;
 }
 
@@ -892,7 +932,7 @@ int hradecFS_flush(const char *path, struct fuse_file_info *fi)
 {
     log_msg("\n>>>>>>>>>>>>>>>>>>>>>>>>\n hradecFS_flush  %s [%d] \n>>>>>>>>>>>>>>>>>>>>>>>>>>>>\n", path, fuse_get_context()->uid);
     CACHE.init( path );
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     int res = -1;
 
@@ -903,7 +943,7 @@ int hradecFS_flush(const char *path, struct fuse_file_info *fi)
     if( res == 0 )
         CACHE.localFileExist( path );
 
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     log_msg("\n====>flush     uid: [%4d]  path: %s\n", fuse_get_context()->uid, path);
     return 0;
@@ -918,7 +958,7 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
     // log_fi(fi);
 
     CACHE.init( path );
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     // We need to close the file.  Had we allocated any resources
     // (buffers etc) we'd need to free them here as well.
@@ -944,7 +984,7 @@ int hradecFS_release(const char *path, struct fuse_file_info *fi)
             fclose(file);
         }
     }
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     return ret;
 }
@@ -958,7 +998,7 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     // log_fi(fi);
 
     CACHE.init(path);
-    pthread_mutex_lock(CACHE.mutex(path));
+    CACHE.mutex_lock(path);
 
     // some unix-like systems (notably freebsd) don't have a datasync call
     int res = -1;
@@ -972,7 +1012,7 @@ int hradecFS_fsync(const char *path, int datasync, struct fuse_file_info *fi)
     if( res == 0 )
         CACHE.localFileExist( path );
 
-    pthread_mutex_unlock(CACHE.mutex(path));
+    CACHE.mutex_unlock(path);
 
     log_msg("\n====>fsync     uid: [%4d]  return: [%2d] path: %s\n", fuse_get_context()->uid, res, path);
     return res;
@@ -1318,7 +1358,6 @@ int main(int argc, char *argv[])
 
 
     sprintf(__cacheDir,"%s_cachedir", hradecFS_data->mountdir);
-    //sprintf(__syncCommand,"/bin/rsync -avpPz -e '/bin/ssh -p 22002' atomo2.no-ip.org:/ZRAID/atomo/%%s %%s");
     sprintf(__syncCommand,"/bin/rsync -avpP %%s %%s");
     // fprintf(stderr, "1\n");
 

@@ -242,6 +242,10 @@ class __cache {
             for ( unsigned int i = 0; i < files3.size(); i++ ) {
                 remove( files3[i].c_str() );
             }
+            vector<string> files6 = glob(_cacheControl() + "*cacheFileNotExist" );
+            for ( unsigned int i = 0; i < files6.size(); i++ ) {
+                remove( files6[i].c_str() );
+            }
 
             // and links!
             vector<string> files4 = glob(_cacheControl() + "*__link__" );
@@ -434,6 +438,15 @@ class __cache {
             init( path );
             return &m_mutex[path];
         }
+        void mutex_lock( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg5("\n====>mtx_lock  uid: [%4d]  path: %s  caller: %s\n", fuse_get_context()->uid, path.c_str(), caller);
+            pthread_mutex_lock(mutex(path));
+        }
+        void mutex_unlock( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg5("\n====>mtx_unlok uid: [%4d]  path: %s  caller: %s\n", fuse_get_context()->uid, path.c_str(), caller);
+            pthread_mutex_unlock(mutex(path));
+        }
+
         const char * localPathDir(string path){
             init( path );
             return m_cache[path]["cacheFileDir"].c_str();
@@ -459,6 +472,8 @@ class __cache {
             }else{
                 log_msg("   localFileNotExist   %s\n", m_cache[path]["cacheFileNotExist"].c_str());
                 close( creat( m_cache[path][ft].c_str(), 0777 ) );
+                boost::filesystem::remove_all( localPath( path ) );
+                boost::filesystem::remove_all( localPathLog( path ) );
             }
         }
         void localFileNotExistRemove(string path){
@@ -539,7 +554,7 @@ class __cache {
 
             time_t timer;
 
-            bool shouldSetStat=true;
+            bool shouldSetStat=false;
             struct stat statbuf;
             memset( &statbuf, 0, sizeof(statbuf) );
 
@@ -551,34 +566,39 @@ class __cache {
                 if ( lstat( localPath(path), &statbuf ) != 0 ) {
                     // if no stat, there's no file yet!!
                     // so we set a standard stat for the file here, derivated from the parent dir
-                    struct stat parent_statbuf;
-                    lstat( localPathDir(path), &parent_statbuf );
-                    statbuf.st_mode  = parent_statbuf.st_mode;
-                    statbuf.st_atime = time(NULL);
-                    statbuf.st_ctime = time(NULL);
+                    // struct stat parent_statbuf;
+                    // lstat( localPathDir(path), &parent_statbuf );
+                    // statbuf.st_mode  = parent_statbuf.st_mode;
+                    // statbuf.st_atime = time(NULL);
+                    // statbuf.st_ctime = time(NULL);
                 }
 
                 // special condition to force using the current user name in the stat
-                if( caller != no_uid && fuse_get_context()->uid != 0 ){
-                    statbuf.st_uid   = fuse_get_context()->uid;
-                    statbuf.st_gid   = fuse_get_context()->gid;
-                }
+                // if( caller != no_uid && fuse_get_context()->uid != 0 ){
+                //     statbuf.st_uid   = fuse_get_context()->uid;
+                //     statbuf.st_gid   = fuse_get_context()->gid;
+                // }
                 statbuf.st_mtime = time(NULL);
                 statbuf.st_atime = time(NULL);
 
                 // again, if its locally created and the UID/GID are root, set
                 // the current user as UID/GID!
                 // hopefully this will fix permissions if something goes wrong
-                if( statbuf.st_uid == 0 )
-                    statbuf.st_uid = fuse_get_context()->uid;
-                if( statbuf.st_gid == 0 )
-                    statbuf.st_gid = fuse_get_context()->gid;
+                // if(  fuse_get_context()->uid != 0 ){
+                //     if( statbuf.st_uid == 0 )
+                //         statbuf.st_uid = fuse_get_context()->uid;
+                //     if( statbuf.st_gid == 0 )
+                //         statbuf.st_gid = fuse_get_context()->gid;
+                // }
+
+                shouldSetStat=true;
 
             }else if( ! exists( localPathLog( path ) ) ) {
                 // if the file is not locally created/modified, and the localPathLog
                 // doesn't exist, we need to get the stat from the remote!
                 log_msg( "\nREMOTE !!! localFileExist: !exists(localPathLog()) lstat( %s )\n", path.c_str() );
                 lstat( remotePath(path), &statbuf );
+                shouldSetStat=true;
 
             }else{
                 // so, its not Local and the local pathlog exists!
@@ -588,6 +608,18 @@ class __cache {
                 // since they don't change!
                 shouldSetStat=false;
             }
+
+            // fix UID if wrong
+            if(  fuse_get_context()->uid != 0 ){
+                log_msg5("\n====>fixUID    uid: [%4d]  statUID: [%4d] path: %s\n", fuse_get_context()->uid, statbuf.st_uid, path.c_str());
+                if( statbuf.st_uid == 0 )
+                    statbuf.st_uid = fuse_get_context()->uid;
+                if( statbuf.st_gid == 0 )
+                    statbuf.st_gid = fuse_get_context()->gid;
+                shouldSetStat=true;
+            }
+
+
             // from this point forward, statbuf is initialized and will be used to set the cache  files.
 
             //create the skeleton file (the cache file, no the log file), if
@@ -934,6 +966,7 @@ class __cache {
             struct stat statbuf;
             // stat(path, &statbuf);
             close( creat( m_cache[path]["cacheFileNotExist"].c_str(), S_IRWXU | S_IRWXG | S_IRWXO ) );
+            localFileNotExist( path );
         }
 
         bool removeDir( string path ){
