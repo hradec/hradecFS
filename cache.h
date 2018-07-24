@@ -120,6 +120,9 @@ class __cache {
         map <string, map<string, string> > m_cache;
         map <string, struct stat *> m_stat;
         map <string, pthread_mutex_t> m_mutex;
+        map <string, pthread_mutex_t> m_mutex_cache;
+        map <string, pthread_mutex_t> m_mutex_cacheDir;
+        map <string, pthread_mutex_t> m_mutex_logfile;
 
         // string cacheFileNotExist;
         // string cacheDirNotExist;
@@ -172,6 +175,12 @@ class __cache {
             return boost::replace_all_copy( path, "//" , "/" );
         }
 
+        string __fixFileName( string fileName ){
+            if( fileName.length() > 210 )
+                fileName = fileName.substr( fileName.size() - 210 );
+            return fileName;
+        }
+
         void init(string path){
             string __sep__ = "_";
 
@@ -201,19 +210,23 @@ class __cache {
                 m_stat[path]                        = NULL;
                 // m_mutex[path]                       = PTHREAD_MUTEX_INITIALIZER;
                 pthread_mutex_init( &m_mutex[path], NULL );
+                pthread_mutex_init( &m_mutex_cache[path], NULL );
+                pthread_mutex_init( &m_mutex_cacheDir[path], NULL );
+
 
                 m_cache[path]["cacheFile_log_suf"]  = "";
                 m_cache[path]["cacheFile_log"]      =  _cacheControl();
                 m_cache[path]["cacheFile_log"]     += m_cache[path]["p"]+".hradecFS";
                 m_cache[path]["cacheFile_log"]     += m_cache[path]["cacheFile_log_suf"];
+
+                // we have to garantee the log file is smaller than the maximum of 255 file name lenght.
+                m_cache[path]["cacheFile_log"]      = __fixFileName( m_cache[path]["cacheFile_log"] );
+                pthread_mutex_init( &m_mutex_logfile[m_cache[path]["cacheFile_log"]], NULL );
             }
             pthread_mutex_unlock(&mutex_init);
         }
 
-
-
         void cleanupBeforeStart(){
-
 
             pthread_mutex_init( &__mutex_localFileExist , NULL );
             pthread_mutex_init( &mutex_cache_path       , NULL );
@@ -265,7 +278,7 @@ class __cache {
                 string path = boost::replace_all_copy( getPathFromLogFile( files4[i] ), _cachePath(), "" );
                 init( path );
                 m_cache[path]["cacheFile_log"] = files4[i];
-                 // log_msg("------------->%s....%s....%d<<<<<<\n",path.c_str(), m_cache[path]["cacheFile_log"].c_str(), m_cache.count(path));
+                 log_msg("------------->%s....%s....%d<<<<<<\n",path.c_str(), m_cache[path]["cacheFile_log"].c_str(), m_cache.count(path));
             }
 
             files4 = glob(_cacheControl() + "*__link_local__" );
@@ -297,16 +310,22 @@ class __cache {
             _stat( path, &statbuf );
         }
 
-        int _stat(string path, struct stat *statbuf){
+        int _stat(string path, struct stat *statbuf, const char* caller = __builtin_FUNCTION()){
             // get path STAT and cache it.
             int uid = -1;
             int retstat=-2;
-            log_msg("    >>>  CACHE.stat(%s) uid [%d]\n", path.c_str(), fuse_get_context()->uid);
+            log_msg("\n    >>>  CACHE.stat(%s) uid [%d]  caller: %s\n", path.c_str(), fuse_get_context()->uid, caller);
             // if(m_stat[path]==NULL){
-                if( isLocallyCreated( path ) || existsLocal(path) ){
+
+                // if we deleted it locally, it doesn't exist!
+                if ( exists( m_cache[path]["cacheDirNotExist"].c_str() ) || exists( m_cache[path]["cacheFileNotExist"].c_str() ) ){
+                    retstat=-2;
+                }else
+                if( isLocallyCreated( path ) || existsLocal( path ) || existsRemote( path ) ){
                     log_msg("\n!!! 1\n");
                     retstat = lstat( localPath(path), statbuf );
                     log_msg("\n!!! 1\n" );
+                    // getPathSizeFromLog will return -1 if something goes wrong!
                     statbuf->st_size = getPathSizeFromLog( path );
                     log_msg("\n!!! 11\n");
                     struct stat statbufLog;
@@ -321,18 +340,19 @@ class __cache {
                         }
                     }
                     uid = statbuf->st_uid;
-                }else if( existsRemote( path ) ){
-                    retstat = lstat( remotePath(path), statbuf );
-                    log_msg("..%s..%d..\n", remotePath(path), statbuf);
-                    uid = statbuf->st_uid;
-                }else{
-                    statbuf=NULL;
                 }
 
-                log_msg("\n!!! 2\n");
-                if( statbuf != NULL && retstat < 0 ){
+                // if the parent folder doesn't exist, we need to check on the remote side!
+                // if the parent exists, means the file doesn't exist remotely either!
+                // }else if( existsRemote(path) ){
+                //     retstat = lstat( localPath(path), statbuf );
+                //     log_msg("!!!  2 ..%s..%d..\n", remotePath(path), statbuf);
+                //     uid = statbuf->st_uid;
+
+                if( retstat < 0  ||  statbuf->st_size<0 ){
                     log_msg("\n!!! 3\n");
                     memset( statbuf, 0, sizeof(statbuf) );
+                    retstat = -2;
                 }
 
                 // m_stat[path]=new struct stat;
@@ -367,7 +387,7 @@ class __cache {
 
             // log_msg("CACHE.stat(%s)..%d..\n", path.c_str(), int(m_stat[path]->st_ino));
 
-            log_msg( "    >>>  CACHE.stat(%s) return %d - uid [%d] \n", path.c_str(), retstat, uid );
+            log_msg( "\n    >>>  CACHE.stat(%s) return %d - uid [%d] \n", path.c_str(), retstat, uid );
             return retstat;
         }
 
@@ -384,16 +404,17 @@ class __cache {
             char buff[8193];
             int nsplit;
             if( getFileSize( logfilepath ) <5 ){
-                return 0;
+                return ret;
             }
             // log_msg("\n!!! 4 [%d] [%d] %d %d \n   [%s]\n", pthread_mutex_trylock(&__mutex_localFileExist),
             //        0, EBUSY, EINVAL ,logfilepath.c_str() );
 
-            pthread_mutex_lock(&__mutex_localFileExist);
+            // char * mutex_in_case_logfilepath_changes = logfilepath.c_str();
+            // pthread_mutex_lock( &m_mutex_logfile[ mutex_in_case_logfilepath_changes ] );
             int file = open( logfilepath.c_str(), O_RDONLY );
             read( file, buff, 8192 );
             close( file );
-            pthread_mutex_unlock(&__mutex_localFileExist);
+            // pthread_mutex_unlock( &m_mutex_logfile[ mutex_in_case_logfilepath_changes ] );
 
             string tmp = buff;
 
@@ -409,21 +430,29 @@ class __cache {
             return ret;
         }
 
+        long long getPathSizeFromLogFile( string logfilepath ){
+            long long ret = (long long)atoll( __parseLogFile( logfilepath, 1 ).c_str() );
+            return ret;
+        }
         long long getPathSizeFromLog( string path ){
             if( path == "/" ) return 0;
             __checkLogFile( path );
-            return  getPathSizeFromLogFile( localPathLog( path ) );
+            mutex_lock_cache(path);
+            long long ret =  getPathSizeFromLogFile( localPathLog( path ) );
+            mutex_unlock_cache(path);
+            return ret;
         }
-        long long getPathSizeFromLogFile( string logfilepath ){
-            return (long long)atoll( __parseLogFile( logfilepath, 1 ).c_str() );
-        }
-        string getPathFromLog( string path ){
-            __checkLogFile( path );
-            return  getPathFromLogFile( localPathLog( path ) );
-        }
+
         string getPathFromLogFile( string logfilepath ){
             string ret = __parseLogFile( logfilepath, 0 ).c_str();
             return  ret == "-1" ? "/__NO_PATH_IN_LOG_FILE__" : ret;
+        }
+        string getPathFromLog( string path ){
+            __checkLogFile( path );
+            mutex_lock_cache(path);
+            string ret = getPathFromLogFile( localPathLog( path ) );
+            mutex_unlock_cache(path);
+            return ret;
         }
 
         const char * localPathLock(string path){
@@ -431,20 +460,36 @@ class __cache {
             return m_cache[path]["cacheLockFile"].c_str();
         }
         const char * localPath(string path){
-            init( path );
             return m_cache[path]["cacheFile"].c_str();
         }
         pthread_mutex_t * mutex(string path){
-            init( path );
             return &m_mutex[path];
         }
         void mutex_lock( string path, const char* caller = __builtin_FUNCTION() ){
-            log_msg5("\n====>mtx_lock  uid: [%4d]  path: %s  caller: %s\n", fuse_get_context()->uid, path.c_str(), caller);
-            pthread_mutex_lock(mutex(path));
+            log_msg6("\n====>mtx_lock  uid: [%4d]  path: %s  mutex: 0x%p  caller: %s\n", fuse_get_context()->uid, path.c_str(), mutex(path), caller);
+            pthread_mutex_lock(&m_mutex[path]);
         }
         void mutex_unlock( string path, const char* caller = __builtin_FUNCTION() ){
-            log_msg5("\n====>mtx_unlok uid: [%4d]  path: %s  caller: %s\n", fuse_get_context()->uid, path.c_str(), caller);
-            pthread_mutex_unlock(mutex(path));
+            log_msg6("\n====>mtx_unlok uid: [%4d]  path: %s  mutex: 0x%p  caller: %s\n", fuse_get_context()->uid, path.c_str(), mutex(path), caller);
+            pthread_mutex_unlock(&m_mutex[path]);
+        }
+
+        void mutex_lock_cache( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg6("\n====>mtx_lock_cache  uid: [%4d]  path: %s  mutex: 0x%p  caller: %s\n", fuse_get_context()->uid, path.c_str(), &m_mutex_cache[path], caller);
+            pthread_mutex_lock(&m_mutex_cache[path]);
+        }
+        void mutex_unlock_cache( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg6("\n====>mtx_unlok_cache uid: [%4d]  path: %s  mutex: 0x%p  caller: %s\n", fuse_get_context()->uid, path.c_str(), &m_mutex_cache[path], caller);
+            pthread_mutex_unlock(&m_mutex_cache[path]);
+        }
+
+        void mutex_lock_cacheDir( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg6("\n====>mtx_lock_cacheDir  uid: [%4d]  path: %s  mutex: 0x%p   caller: %s\n", fuse_get_context()->uid, path.c_str(), &m_mutex_cacheDir[path], caller);
+            pthread_mutex_lock(&m_mutex_cacheDir[path]);
+        }
+        void mutex_unlock_cacheDir( string path, const char* caller = __builtin_FUNCTION() ){
+            log_msg6("\n====>mtx_unlok_cacheDir uid: [%4d]  path: %s  mutex: 0x%p   caller: %s\n", fuse_get_context()->uid, path.c_str(), &m_mutex_cacheDir[path], caller);
+            pthread_mutex_unlock(&m_mutex_cacheDir[path]);
         }
 
         const char * localPathDir(string path){
@@ -453,7 +498,7 @@ class __cache {
         }
         const char * remotePath( string path, const char* caller = __builtin_FUNCTION() ){
             init( path );
-            log_msg("REMOTE    remotePath(%s) caller(%s)\n", m_cache[path]["abspath"].c_str(), caller );
+            // log_msg("REMOTE    remotePath(%s) caller(%s)\n", m_cache[path]["abspath"].c_str(), caller );
             return m_cache[path]["abspath"].c_str();
         }
 
@@ -463,17 +508,19 @@ class __cache {
         }
 
         void localFileNotExist(string path, bool _remove=false){
-            const char *ft="cacheFileNotExist";
             if(_remove){
-                if( exists( m_cache[path][ft].c_str() ) ){
+                if( exists( m_cache[path]["cacheFileNotExist"].c_str() ) ){
                     log_msg("   localFileNotExist  remove  %s\n", m_cache[path]["cacheFileNotExist"].c_str());
-                    remove( m_cache[path][ft].c_str() );
+                    remove( m_cache[path]["cacheFileNotExist"].c_str() );
                 }
             }else{
-                log_msg("   localFileNotExist   %s\n", m_cache[path]["cacheFileNotExist"].c_str());
-                close( creat( m_cache[path][ft].c_str(), 0777 ) );
-                boost::filesystem::remove_all( localPath( path ) );
-                boost::filesystem::remove_all( localPathLog( path ) );
+                log_msg("   localFileNotExist   %s = %s\n", path.c_str(), m_cache[path]["cacheFileNotExist"].c_str());
+                close( creat( m_cache[path]["cacheFileNotExist"].c_str(), 0777 ) );
+
+                if( exists( localPath( path ) ) )
+                    boost::filesystem::remove_all( localPath( path ) );
+                if( exists( localPathLog( path ) ) )
+                    boost::filesystem::remove_all( localPathLog( path ) );
             }
         }
         void localFileNotExistRemove(string path){
@@ -489,14 +536,18 @@ class __cache {
         const char * localPathLog(string path, string suffix="none"){
             init( path );
             if( suffix!="none" ){
-                pthread_mutex_lock(&mutex_init);
+                pthread_mutex_lock( &mutex_init );
+                // char * old_mutex = m_cache[path]["cacheFile_log"].c_str();
+                // pthread_mutex_lock( &m_mutex_logfile[ old_mutex ] );
                 if (  m_cache[path]["cacheFile_log_suf"] != suffix ){
                     m_cache[path]["cacheFile_log_suf"] = suffix;
                     m_cache[path]["cacheFile_log"]     =  _cacheControl();
                     m_cache[path]["cacheFile_log"]    += m_cache[path]["p"]+".hradecFS";
                     m_cache[path]["cacheFile_log"]    += m_cache[path]["cacheFile_log_suf"];
                 }
-                pthread_mutex_unlock(&mutex_init);
+                // pthread_mutex_init( &m_mutex_logfile[m_cache[path]["cacheFile_log"]], NULL );
+                // pthread_mutex_unlock( &m_mutex_logfile[ old_mutex ] );
+                pthread_mutex_unlock( &mutex_init );
             }
             return m_cache[path]["cacheFile_log"].c_str();
         }
@@ -513,13 +564,31 @@ class __cache {
             else{
                 ret = local ? ".__local__" : "";
             }
+
             return ret;
         }
         bool isLocallyCreated( string path ){
-            return int( m_cache[path]["cacheFile_log"].find( "_local__" ) ) >= 0;
+            bool ret = int( m_cache[path]["cacheFile_log"].find( "_local__" ) ) >= 0;
+            // we have to check if the logFile exists, or else we need to reset the
+            // the log file back to NOT being local!
+            if ( ret && ! exists( m_cache[path]["cacheFile_log"].c_str() ) ) {
+                ret = false;
+                pthread_mutex_lock( &mutex_init );
+                m_cache[path]["cacheFile_log_suf"]  = "";
+                m_cache[path]["cacheFile_log"]      =  _cacheControl();
+                m_cache[path]["cacheFile_log"]     += m_cache[path]["p"]+".hradecFS";
+                m_cache[path]["cacheFile_log"]     += m_cache[path]["cacheFile_log_suf"];
+
+                // we have to garantee the log file is smaller than the maximum of 255 file name lenght.
+                pthread_mutex_init( &m_mutex_logfile[m_cache[path]["cacheFile_log"]], NULL );
+                pthread_mutex_unlock( &mutex_init );
+            }
+            return ret;
         }
         void setLocallyCreated( string path ){
-            localPathLog( path, __logSuffix( path, true ) );
+            close( creat(
+                localPathLog( path, __logSuffix( path, true ) )
+            , 0777 ) );
         }
         void setLogFileType( string path, bool locallyCreated=false ){
             localPathLog( path, __logSuffix( path, locallyCreated ) );
@@ -548,6 +617,7 @@ class __cache {
             // this account for local created files - mknod and write funcions
             // sets the log file to local when creating/modifiying the file,
             // so we known here its local!
+            init(path);
             bool localFile =  isLocallyCreated( path );
 
             log_msg("\n !!! localFileExist: uid [%d]  - isLocallyCreated(%s)=%d  || exists( localPathLog( path ) ) = %d\n", fuse_get_context()->uid, path.c_str(), localFile, exists( localPathLog( path ) ));
@@ -563,35 +633,32 @@ class __cache {
                 // if we get here, it means the file is created/modified locally!
                 log_msg("\n !!! \tlocalFileExist: if(localFile) = true\n");
 
-                if ( lstat( localPath(path), &statbuf ) != 0 ) {
-                    // if no stat, there's no file yet!!
-                    // so we set a standard stat for the file here, derivated from the parent dir
-                    // struct stat parent_statbuf;
-                    // lstat( localPathDir(path), &parent_statbuf );
-                    // statbuf.st_mode  = parent_statbuf.st_mode;
-                    // statbuf.st_atime = time(NULL);
-                    // statbuf.st_ctime = time(NULL);
+                // we get the stat of the local file and also check if it exists!!
+                if ( lstat( localPath(path), &statbuf ) == 0 ) {
+
+                    // fix current mtime and atime!
+                    if( statbuf.st_mtime == 0 )
+                        statbuf.st_mtime = time(NULL);
+                    if( statbuf.st_atime == 0 )
+                        statbuf.st_atime = time(NULL);
+
+                    // if its locally created and the UID is root, set
+                    // the current user as UID/GID!
+                    // hopefully this will fix permissions if something goes wrong
+                    if(  fuse_get_context()->uid != 0 && statbuf.st_uid != fuse_get_context()->uid && caller != no_uid ){
+                        // fix UID if wrong
+                        log_msg5("\n====>fixUID    uid: [%4d]  statUID: [%4d] path: %s\n", fuse_get_context()->uid, statbuf.st_uid, path.c_str());
+                        if( statbuf.st_uid == 0 )
+                            statbuf.st_uid = fuse_get_context()->uid;
+                        if( statbuf.st_gid == 0 )
+                            statbuf.st_gid = fuse_get_context()->gid;
+                    }
+
+                    if( statbuf.st_mode == 0)
+                        statbuf.st_mode = ( S_IRWXU | S_IRWXG | S_IRWXO );
+
+                    shouldSetStat=true;
                 }
-
-                // special condition to force using the current user name in the stat
-                // if( caller != no_uid && fuse_get_context()->uid != 0 ){
-                //     statbuf.st_uid   = fuse_get_context()->uid;
-                //     statbuf.st_gid   = fuse_get_context()->gid;
-                // }
-                statbuf.st_mtime = time(NULL);
-                statbuf.st_atime = time(NULL);
-
-                // again, if its locally created and the UID/GID are root, set
-                // the current user as UID/GID!
-                // hopefully this will fix permissions if something goes wrong
-                // if(  fuse_get_context()->uid != 0 ){
-                //     if( statbuf.st_uid == 0 )
-                //         statbuf.st_uid = fuse_get_context()->uid;
-                //     if( statbuf.st_gid == 0 )
-                //         statbuf.st_gid = fuse_get_context()->gid;
-                // }
-
-                shouldSetStat=true;
 
             }else if( ! exists( localPathLog( path ) ) ) {
                 // if the file is not locally created/modified, and the localPathLog
@@ -603,22 +670,14 @@ class __cache {
             }else{
                 // so, its not Local and the local pathlog exists!
                 // in this case, we grab the stat from the actual local cache file!
-                lstat( localPath(path), &statbuf );
+                lstat( localPathLog(path), &statbuf );
                 // also instruct the next code to NOT re-update the stats on the file,
                 // since they don't change!
                 shouldSetStat=false;
             }
 
-            // fix UID if wrong
-            if(  fuse_get_context()->uid != 0 ){
-                log_msg5("\n====>fixUID    uid: [%4d]  statUID: [%4d] path: %s\n", fuse_get_context()->uid, statbuf.st_uid, path.c_str());
-                if( statbuf.st_uid == 0 )
-                    statbuf.st_uid = fuse_get_context()->uid;
-                if( statbuf.st_gid == 0 )
-                    statbuf.st_gid = fuse_get_context()->gid;
-                shouldSetStat=true;
-            }
-
+            // set the correct log file name, depending on the type of entry (dir/file/link, local or not)
+            setLogFileType( path, localFile );
 
             // from this point forward, statbuf is initialized and will be used to set the cache  files.
 
@@ -628,11 +687,9 @@ class __cache {
                 close( creat( localPath( path ), statbuf.st_mode & ( S_IRWXU | S_IRWXG | S_IRWXO ) ) );
 
             // set the stats of the cache file (not the log file)
-            if(shouldSetStat)
+            if(shouldSetStat){
                 setStats( localPath( path ), &statbuf );
-
-            // set the correct log file name, depending on the type of entry (dir/file/link, local or not)
-            setLogFileType( path, localFile );
+            }
 
             if( ! exists( localPathLog( path ) ) || localFile ){
                 // create a log file for every file/folder/link
@@ -641,21 +698,26 @@ class __cache {
                 string tmp = _format( "%s*%lld*%lld*%lld\n", localPath( path ) , (long long) statbuf.st_size,
                                                             (long long) statbuf.st_ino, (long long)timer );
 
-                pthread_mutex_lock(&__mutex_localFileExist);
+                // const char * old_mutex = localPathLog( path );
+                // pthread_mutex_lock( &m_mutex_logfile[ old_mutex ] );
+                mutex_lock_cache(path);
                 remove( localPathLog( path ) );
                 int file = creat( localPathLog( path ), statbuf.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO) );
                 write( file, tmp.c_str(),  tmp.length() );
                 close( file );
-                pthread_mutex_unlock(&__mutex_localFileExist);
+                mutex_unlock_cache(path);
+                // pthread_mutex_unlock( &m_mutex_logfile[ old_mutex ] );
 
                 // set remote file stats to log file as well
                 // but time should be current!!
                 statbuf.st_mtime = time(NULL);
                 statbuf.st_atime = time(NULL);
                 setStats( localPathLog( path ), &statbuf);
+                setStats( localPath( path ), &statbuf );
                 log_msg( "\n !!! localFileExist: create skeleton %s --> %s \n",  localPathLog( path ), localPath( path ) );
             }
             localFileNotExistRemove( path );
+
         }
 
         void doCachePath(string path, int __depth=0){
@@ -666,11 +728,15 @@ class __cache {
             // does a initial cache of folder, files and links, to avoid
             // querying the remote side for simple readdir() calls to the same path
             // TODO: a refresh thread to maintain this initial cache up2date with the remote side!
+            path = fixPath(path);
+
             init(path);
             char buf[8192];
             unsigned long len;
 
-            path = fixPath(path);
+            char * mutex = path.c_str();
+            // mutex_lock_cache(mutex);
+
 
             // we dont need to check the return of lstat, since we KNOWN at this point that
             // the path exists!
@@ -680,11 +746,22 @@ class __cache {
             if ( islnk( remotePath(path) ) ){
                 if ( (len = readlink(remotePath(path), buf, sizeof(buf)-1)) != -1 ){
                     // cleanup if theres another entry with the same name.
-                    if( exists( localPath( path ) ) && ! islnk( localPath(path) ) ){
+                    if( exists( localPath( path ) ) && isdir( localPath(path) ) ){
                         boost::filesystem::remove_all( localPath( path ) );
+                    }else{
+                        boost::filesystem::remove( localPath( path ) );
                     }
                     buf[len] = '\0';
-                    symlink(buf, localPath(path));
+                    string linkPath = buf;
+
+                    // if the link is absolute, we have to fix it so it works in the
+                    // cache filesystem correctly.
+                    if( buf[0] == '/' ){
+                        // for now, we just simply prefix the mount dir to the path
+                        linkPath = fixPath( string(BB_DATA->mountdir)+"/"+buf );
+                    }
+
+                    symlink( linkPath.c_str(), localPath(path) );
                     log_msg( "\nlink path %s = remotePath(%s) %s \n", buf, remotePath(path), localPath(path) );
                 }
             }else
@@ -704,22 +781,26 @@ class __cache {
 
             }else{
                 localFileNotExist( path );
+                // mutex_unlock_cache(mutex);
                 return;
             }
             localFileExist(path);
+            // mutex_unlock_cache(mutex);
         }
 
-        void doCachePathDir(string path, int __depth=0){
+        void doCachePathDir(string path, int __depth=0, const char* caller = __builtin_FUNCTION()){
             // do a initial cache of the entire folder of a path, so we can
             // collect all the data we can using the same time of a single path.
             init(path);
 
+
             // if already cached, don't cache again!
             path = fixPath(path);
             if ( isDirCached( path ) || isLocallyCreated( path ) ){
-                log_msg( "======> doCachePathDir: isDirCached True - %s / locallyCreated = \n", path.c_str(), isLocallyCreated( path ) );
+                log_msg( "\n======> doCachePathDir: isDirCached True - %s / locallyCreated = \n", path.c_str(), isLocallyCreated( path ) );
                 return ;
             }
+
             log_msg( "\nREMOTE ====> doCachePathDir: %s -> %s\n", path.c_str(), remotePath(path) );
 
             // log_msg( "-----------=====>%s<===>%s<===\n", __remotePath.c_str(), path.c_str() );
@@ -735,13 +816,19 @@ class __cache {
 
             vector<string> files = vector<string>();
             if( getdir( fixPath( remotePath(path) ) + "/", files ) )
-                log_msg( "!!!! exception remotepath getidr(%s)\n", (fixPath( remotePath(path) ) + "/").c_str() );
+                log_msg( "!!!! exception remotepath getdir(%s)\n", (fixPath( remotePath(path) ) + "/").c_str() );
                 //throw except;
 
             for ( unsigned int i = 0; i < files.size(); i++ ) {
+                if( files[i].find(".fuse_hidden") != std::string::npos ){
+                    continue;
+                }else
+                if( files[i].find(".nfs00") != std::string::npos ){
+                    continue;
+                }
                 struct stat statbuf2;
                 string glob_path = boost::replace_all_copy( files[i], BB_DATA->rootdir, "" );
-                log_msg("---getdir-------->%s\n", files[i].c_str());
+                log_msg("---getdir-------->%s - caller %s\n", glob_path.c_str(),caller );
                 if( glob_path != path ) init( glob_path );
                 if( ! existsLocal( glob_path ) ){
                     doCachePath( glob_path, &statbuf2, __depth );
@@ -760,7 +847,7 @@ class __cache {
 
         }
 
-        void doCachePathParentDir(string path){
+        void doCachePathParentDir(string path, const char* caller = __builtin_FUNCTION()){
             // cache the parent folder of a path!
             if( path.length() > 1 ){
                 path = rtrim( path, "/" );
@@ -772,9 +859,10 @@ class __cache {
             vector<string> p = split(parent, '/');
             for ( unsigned int i = 0; i < p.size(); i++ ) {
                 completePath += "/"+ p[i];
+                completePath = fixPath(completePath);
                 init( completePath );
-                if ( ! isDirCached( completePath ) ){
-                    log_msg("=== > doCachePathParentDir(%s) -> '%s' -> '%s' -> '%s'\n", path.c_str(), remotePath(path), parent.c_str(), BB_DATA->rootdir);
+                if ( ! isDirCached( completePath ) &&  ! isLocallyCreated( completePath ) ){
+                    log_msg("=== > doCachePathParentDir(%s) -> '%s' -> '%s' -> '%s' - caller %s\n", path.c_str(), remotePath(path), parent.c_str(), BB_DATA->rootdir, caller);
                     doCachePathDir( completePath );
                 }
             }
@@ -785,9 +873,11 @@ class __cache {
             init( path );
             log_msg("   readDirCached   cacheReadDir: %s\n", m_cache[path]["cacheReadDir"].c_str());
 
-            pthread_mutex_lock(&mutex_cache_path_dir);
+            // pthread_mutex_lock(&mutex_cache_path_dir);
+            mutex_lock_cacheDir(path);
             close( creat( m_cache[path]["cacheReadDir"].c_str(), 0777 ) );
-            pthread_mutex_unlock(&mutex_cache_path_dir);
+            mutex_unlock_cacheDir(path);
+            // pthread_mutex_unlock(&mutex_cache_path_dir);
 
             setLogFileType( path );
             // if ( m_cache[path]["cacheFile_log"].find(".__folder__") == string::npos )
@@ -803,9 +893,11 @@ class __cache {
             init(path);
 
             log_msg("\n\n\tisDirCached: '%s' '%s'\n\n", m_cache[path]["cacheReadDir"].c_str(), path.c_str());
-            pthread_mutex_lock(&mutex_cache_path_dir);
+            // pthread_mutex_lock(&mutex_cache_path_dir);
+            // mutex_lock_cacheDir(path);
             bool ret=exists( m_cache[path]["cacheReadDir"].c_str() );
-            pthread_mutex_unlock(&mutex_cache_path_dir);
+            // mutex_unlock_cacheDir(path);
+            // pthread_mutex_unlock(&mutex_cache_path_dir);
 
             return ret;
         }
@@ -826,15 +918,24 @@ class __cache {
             init(path);
             log_msg("\n>>>> existsRemote depth=%d\n", depth);
 
+            // if the entry has been marked as inexistent, we already return false here, since it doesn't exist!
             if ( exists( m_cache[path]["cacheDirNotExist"].c_str() ) || exists( m_cache[path]["cacheFileNotExist"].c_str() ) ){
                 log_msg("\nexistsRemote -> first if - return False - '%s'  '%s'\n",m_cache[path]["cacheDirNotExist"].c_str(), m_cache[path]["cacheFileNotExist"].c_str() );
                 return false;
             }
 
+            // the next 2 if's are responsable for fixing problems in the cache, and consenquently they
+            // can be used to update entrys in the cache.
+            // to update a folder - remove the folder from the /filesystem/ folder
+            // to update a file   - remove the file from the /filesystem/ folder
+            //
+            // NEVER mess with the files in the /control/ folder! They should be administrated by
+            // this code only!!
+
             // if dir is cached or exists locally, means it exists remotely!
             // if it was deleted remotely, theres another thread wich will delete it locally,
             // so we don't have to check remotely here!!
-            log_msg("\nexistsRemote -> second if existLocal(%s)\n", localPath(path));
+            log_msg("\nexistsRemote -> second if - check if logFile exists and if parent folder exists -  existLocal(%s)\n", localPath(path));
             if ( existsLocal(path) ){
                 if( isdir(localPath(path)) ){
                     // doCachePathDir( path );
@@ -842,6 +943,14 @@ class __cache {
                     return true;
                 } else {
                     bool ret = exists( localPathLog(path) );
+                    if ( ret && isDirCached( path ) ){
+                        // we have an error that needs to be corrected! If the entry is a folder
+                        // but exists as a file, something went wrong. so lets re-cache it
+                        remove( localPath( path ) );
+                        remove( localPathLog( path ) );
+                        localFileNotExistRemove( path );
+                        doCachePathDir( path );
+                    }
                     log_msg("\nexistsRemote -> second if - return true - log exists = %d - %s\n",ret, localPathLog(path) );
                     return true;
                 }
@@ -855,17 +964,23 @@ class __cache {
             log_msg("\nexistsRemote -> third if - %s %d\n", path.c_str(), isDirCached( _dirname(path) ) );
             if ( isDirCached( _dirname(path) ) ){
                 // if the cachefile log file exists, means the file exists remotely, But
-                // was deleted locally in the cache only, so in this case, we
-                // should retrieve it again!
-                if( exists( localPathLog(path) ) ){
-                    log_msg("\nexistsRemote -> third if log exist - %s\n", localPathLog(path) );
-                    struct stat statbuf;
-                    lstat( localPathLog(path), &statbuf);
+                // was deleted locally in the cache only or something is wrong, so in this case,
+                // we should update it from remote!
+                if( exists( localPathLog(path) ) || ( ( isDirCached( path) )  && ! exists( localPathLog(path) ) ) ){
                     remove( localPathLog(path) );
-                    localFileExist( path );
-                    return true;
+                    localFileNotExistRemove( path );
+                    remove( m_cache[path]["cacheReadDir"].c_str() );
+                    doCachePathDir( path );
+                    // after updating from remote, we return the result of existsLocal(),
+                    // since the entry could very well be deleted remotely!
+                    bool ret = existsLocal( path );
+                    log_msg("\nexistsRemote -> third if - parent cache exists, log exists but no local path, so we re-cached and now existsLocal()=%d - %s\n", ret, path );
+                    return ret;
+
+                // we dont have a log file, but we have a dirCachedFile
+                // and the local path DOESNT exist!
                 }
-                log_msg( "\nexistsRemote -> third if - return False - no cacheFile_log - %s\n", localPathLog(path) );
+                log_msg( "\nexistsRemote -> third if - return False - parent dir exists but no log for the entry, so it doesn't exist - %s\n", path );
                 return false;
             }
 
@@ -885,26 +1000,22 @@ class __cache {
                 if( depth<1 ){
                     doCachePathParentDir( path );
 
-                    // if the folder exists remotely,
-                    // lets cache it to avoid future remote query on the same path
-                    log_msg("\nREMOTE existsRemote -> fifth if  - doCachePath(%s)  \n", path.c_str() );
-                    doCachePath( path );
-                    bool __isdir = isdir( localPath(path) );
-                    if( __isdir ){
-                        log_msg("REMOTE existsRemote -> fifth if  - doCachePathDir(%s)  \n", path.c_str() );
-                        doCachePathDir( path );
-                    }else{
-                    }
-                    // call itself again to do the local evaluation again after the caching!!
-                    // log_msg("existsRemote -> fifth if  - recurse\n" );
+                    // // if the folder exists remotely,
+                    // // lets cache it to avoid future remote query on the same path
+                    // log_msg("\nREMOTE existsRemote -> fifth if  - doCachePath(%s)  \n", path.c_str() );
+                    // doCachePath( path );
+                    // bool __isdir = isdir( localPath(path) );
+                    // if( __isdir ){
+                    //     log_msg("REMOTE existsRemote -> fifth if  - doCachePathDir(%s)  \n", path.c_str() );
+                    //     doCachePathDir( path );
+                    // }else{
+                    // }
+
+                    // now we check if the actual path exists locally, since we cached the whole parent folder.
                     bool ret = existsLocal( path );
                     log_msg("\nREMOTE existsRemote -> fifth if  - recurse returned %d \n", int(ret) );
                     if( ! ret ){
                         // set the path as non-existent, so next time we don't have to look remotely
-                        // if( __isdir ){
-                        //     localDirNotExist( path );
-                        // }else{
-                        // }
                         localFileNotExist( path );
                     }
                     return ret;
@@ -1050,8 +1161,8 @@ class __cache {
 
             // get size
             struct stat fpath_st;
-            _stat((const char *)this->remotePath(path), &fpath_st);
-            remoteSize = getFileSize( remotePath(path) );
+            _stat( remotePath( path ), &fpath_st );
+            remoteSize = getFileSize( remotePath( path ) );
 
             log_msg( "\n\tfileInSync  local path: %s size: %lld \n",  localPath(path), localSize );
             log_msg( "\nREMOTE \tfileInSync remote path: %s size: %lld \n", remotePath(path), remoteSize );

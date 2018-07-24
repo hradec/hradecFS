@@ -27,6 +27,7 @@ struct hradecFS_state {
     char *cachedir;
     char *syncCommand;
     int log;
+    int async;
 };
 #define FUSE_CTX fuse_get_context()
 #define BB_DATA ((struct hradecFS_state *)FUSE_CTX->private_data)

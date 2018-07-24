@@ -62,6 +62,8 @@ using namespace std;
 #define u_int8 unsigned char
 #define BUF_SIZE 2048
 
+static pthread_mutex_t __log_mutex;
+
 // FILE * log_open_UDP(int port)
 // {
 //   u_int8 *buf;
@@ -151,13 +153,15 @@ FILE *log_open_pipe(int flag)
         }
 
         // set logfile to line buffering
-        setvbuf(logfile, NULL, _IOLBF, 0);
+        setvbuf(logfile, NULL, _IOFBF, 131072);
 
     }
 
+    pthread_mutex_init( &__log_mutex , NULL );
 
     return logfile;
 }
+
 
 bool __log_msg(const char *format, ...)
 {
@@ -197,9 +201,9 @@ bool __log_msg(const char *format, ...)
         // string tmp = string("\nhradecFS: ") + format; //_format( , ap);
         string tmp;
         tmp = boost::replace_all_copy( string(buff), "\n\n\n", "\n\n" );
-        if( tmp.find("REMOTE") != string::npos ){
-            tmp = bcyan+"=======================================\n"+tmp;
-        }
+        // if( tmp.find("REMOTE") != string::npos ){
+        //     tmp = bcyan+"=======================================\n"+tmp;
+        // }
         tmp = boost::replace_all_copy( tmp, "\n\n", "\n" );
 
         sprintf( buff2, "\nthread(%d) %d | ", syscall(__NR_gettid), BB_DATA->log );
@@ -214,12 +218,19 @@ bool __log_msg(const char *format, ...)
         tmp = boost::replace_all_copy( tmp, "---", bcyan+"---" );
         tmp = boost::replace_all_copy( tmp, "1.doCache", bmagenta+"1.doCache" );
         tmp = boost::replace_all_copy( tmp, "\n", reset+"\n" );
+        tmp += "\n";
+        tmp = boost::replace_all_copy( tmp, "\n\n", "\n" );
 
+
+        pthread_mutex_lock(&__log_mutex);
 
         fprintf( BB_DATA->logfile, tmp.c_str() );
 
         // fprintf( stderr,  tmp.c_str());
         fflush(BB_DATA->logfile);
+        fseek(BB_DATA->logfile, 0, SEEK_END);
+
+        pthread_mutex_unlock(&__log_mutex);
     }
     return true;
 }
